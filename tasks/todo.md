@@ -1,29 +1,23 @@
 # Todo
 
-> Current work tracker. Update this at the start of every session.
-> Any AI working on this project should read this first.
+> AI: at the start of every session, read CLAUDE.md + lessons.md, then run a planning
+> stage and populate "Next Steps" before touching any code. Check in with the user
+> before starting implementation.
 
 ## 🔄 In Progress
 
 <!-- What is actively being worked on right now -->
 
-## 📋 Up Next
+## 📋 Next Steps
 
-<!-- Prioritized backlog — what gets tackled after current work -->
+<!-- AI populates this during the planning stage at session start.
+     These come from the plan, not from memory. Rewrite this every session. -->
 
 ## ✅ Recently Completed
 
-<!-- Last 3–5 completed items. Move older ones to archive or delete -->
+<!-- Max 3 items. When a 4th is added, delete the oldest.
+     Format: - [what was done] — [one-line result or outcome] -->
 
 ## 🚧 Blocked
 
-<!-- Anything stuck and why -->
-
----
-
-## How to use this file
-
-- AI: read this at session start to understand current context
-- AI: update status as work progresses — don't wait until done
-- AI: when a task is done, move it to Recently Completed with a one-line summary
-- Human: set priorities here before starting a session so the AI knows what matters
+<!-- Anything stuck and why. Tag with who needs to unblock it. -->

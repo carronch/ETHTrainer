@@ -1,0 +1,16 @@
+#!/bin/sh
+# Prevents committing tasks/todo.md as the only changed file.
+# todo.md should only be committed alongside real code changes.
+
+staged=$(git diff --cached --name-only)
+
+if [ "$staged" = "tasks/todo.md" ]; then
+  echo ""
+  echo "  Commit blocked: tasks/todo.md is the only staged file."
+  echo "  todo.md should only be committed alongside other changes."
+  echo "  To include it with your next real commit, leave it staged."
+  echo ""
+  exit 1
+fi
+
+exit 0

@@ -10,11 +10,14 @@ git clone <repo-url>
 cd <project>
 npm install
 
-# 2. Set up local secrets (Cloudflare Workers dev)
+# 2. Activate git hooks (run once per machine)
+git config core.hooksPath .githooks
+
+# 3. Set up local secrets (Cloudflare Workers dev)
 cp .dev.vars.example .dev.vars
 # fill in .dev.vars with your values
 
-# 3. Run locally
+# 4. Run locally
 npm run dev          # starts at http://localhost:8787
 ```
 
