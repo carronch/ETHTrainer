@@ -1,6 +1,7 @@
 # Project
 
 > Replace this with a one-line description of the project.
+> Tip: paste `docs/ai-setup-prompt.md` to Claude or Gemini and it will interview you and generate this file.
 
 ## Stack
 
