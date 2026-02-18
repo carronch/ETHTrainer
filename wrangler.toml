@@ -1,0 +1,35 @@
+name = "my-project"          # replace with your project name
+main = "src/index.js"        # entry point
+compatibility_date = "2026-02-01"
+
+# ─── Local dev ───────────────────────────────────────────────
+[dev]
+port = 8787
+
+# ─── D1 Database (uncomment if using) ────────────────────────
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "my-db"
+# database_id = ""           # wrangler d1 create my-db → paste id here
+
+# ─── R2 Storage (uncomment if using) ─────────────────────────
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "my-bucket"
+
+# ─── KV Storage (uncomment if using) ─────────────────────────
+# [[kv_namespaces]]
+# binding = "KV"
+# id = ""                    # wrangler kv namespace create my-kv → paste id
+
+# ─── Cron Triggers (uncomment to schedule backend tasks) ─────
+# [triggers]
+# crons = ["0 * * * *"]      # runs every hour — replace with your schedule
+
+# ─── Environment Variables (non-secret) ──────────────────────
+# [vars]
+# APP_ENV = "production"
+
+# ─── Secrets (set via CLI, never in this file) ───────────────
+# wrangler secret put ANTHROPIC_API_KEY
+# wrangler secret put GEMINI_API_KEY

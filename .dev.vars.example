@@ -1,0 +1,11 @@
+# Wrangler reads this file for local development (wrangler dev)
+# Copy to .dev.vars and fill in values — never commit .dev.vars
+#
+# To set production secrets:
+#   wrangler secret put SECRET_NAME
+
+# AI (only if your app calls AI APIs at runtime)
+# ANTHROPIC_API_KEY=
+# GEMINI_API_KEY=
+
+# Add your project-specific secrets below

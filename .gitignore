@@ -1,0 +1,52 @@
+# Environment & Secrets
+.env
+.env.*
+.dev.vars
+!.env.example
+!.dev.vars.example
+
+# Cloudflare
+.wrangler/
+.mf/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# AI / ML
+*.gguf
+*.bin
+*.safetensors
+chroma/
+.chroma/
+faiss_index/
+vector_store/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Editors
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Misc
+*.tmp
+*.cache
