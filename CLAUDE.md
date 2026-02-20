@@ -270,12 +270,22 @@ Lido is NOT a strategy. It is **background infrastructure**. Any ETH sitting idl
 | X/Twitter Trending Coins | — | REJECTED (negative EV) | — | See trending_coins playbook |
 
 ### Deployment Order
-1. **Liquidation Bots** — build Aave monitor, backtest 90 days, start on Arbitrum (lower gas, less competition)
-2. **Delta-Neutral Funding Arb** — build dYdX/Hyperliquid client, backtest 90 days funding data, deploy
-3. **Zero-Value Shorts** — build worthlessness scoring system, backtest 2022–2024 collapses, deploy small
-4. **Whale Copy-Trading** — build watchlist + 6-month backtest, deploy at 1% position size
-5. **Polymarket** — requires Polygon bridging + validated signal edges
-6. **Cascade Detection** — monitoring mode only until 50+ real events validated; trade last
+
+**Year 1: Liquidation Bots only. Compound everything.**
+1. **Liquidation Bots (Aave v3 Arbitrum)** — live and compounding. All profits stay in trading wallet.
+2. **Radiant Capital (Arbitrum)** — add as second protocol target. Same architecture.
+3. **Complete borrower coverage** — The Graph for all current borrowers, not just recent events.
+4. **Expand chains** — Aave v3 Base + Optimism. Minimal work, 2× more surface.
+5. **Pre-flight simulation** — eth_call before every submission. No wasted gas.
+
+**After ~5 ETH accumulated:**
+6. **Delta-Neutral Funding Arb** — deploy idle ETH above floor into Hyperliquid hedge. Stack liquidation wins here.
+
+**Parked indefinitely (revisit after validator is funded):**
+- Zero-Value Shorts
+- Whale Copy-Trading
+- Polymarket
+- Cascade Detection
 
 ## Capital Architecture
 ```

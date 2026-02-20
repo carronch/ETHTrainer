@@ -78,6 +78,7 @@ async function main(): Promise<void> {
   const shutdown = () => {
     console.log('\n👋 ETHTrainer shutting down...')
     clearInterval(interval)
+    master.stop()   // stops liquidation bot interval, event monitor, etc.
     closeDb()
     process.exit(0)
   }

@@ -26,6 +26,14 @@ TREASURY_ADDRESS=0x
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
+# ── Arbitrum (liquidation bot) ────────────────────────
+# Separate RPC for Arbitrum — Alchemy, Infura, or own node
+ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+
+# ── Deployed Contracts ────────────────────────────────
+# Set after running: npm run deploy:liquidation
+LIQUIDATION_BOT_ADDRESS=
+
 # ── Agent Config ──────────────────────────────────────
 OBSIDIAN_VAULT_PATH=/Users/treeseedtreeseed/Documents/Obsidian Vault/Charlie Munger's Mental Models
 TRADING_WALLET_FLOOR_ETH=0.5

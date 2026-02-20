@@ -92,10 +92,28 @@ CREATE TABLE IF NOT EXISTS learnings (
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
+-- ── Liquidation Watchlist ─────────────────────────────────────────────────────
+-- All Aave borrowers being monitored for liquidation opportunities
+CREATE TABLE IF NOT EXISTS liquidation_watchlist (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  address               TEXT UNIQUE NOT NULL,     -- lowercase 0x address
+  network               TEXT NOT NULL DEFAULT 'arbitrum',
+  first_seen_block      TEXT,                     -- BigInt as string
+  last_checked_block    TEXT,
+  last_health_factor    TEXT,                     -- BigInt as string (1e18 = 1.0)
+  total_collateral_usd  REAL,
+  total_debt_usd        REAL,
+  is_active             INTEGER NOT NULL DEFAULT 1,
+  created_at            INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at            INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_trades_strategy  ON trades (strategy);
-CREATE INDEX IF NOT EXISTS idx_trades_status    ON trades (status);
-CREATE INDEX IF NOT EXISTS idx_trades_created   ON trades (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_logs_agent ON agent_logs (agent, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_bt_strategy      ON backtest_results (strategy_name);
+CREATE INDEX IF NOT EXISTS idx_trades_strategy    ON trades (strategy);
+CREATE INDEX IF NOT EXISTS idx_trades_status      ON trades (status);
+CREATE INDEX IF NOT EXISTS idx_trades_created     ON trades (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_logs_agent   ON agent_logs (agent, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bt_strategy        ON backtest_results (strategy_name);
+CREATE INDEX IF NOT EXISTS idx_watchlist_network  ON liquidation_watchlist (network, is_active);
+CREATE INDEX IF NOT EXISTS idx_watchlist_hf       ON liquidation_watchlist (last_health_factor);
 `

@@ -20,4 +20,58 @@ Purpose: prevent the same mistake from happening twice.
 
 ## Lessons
 
-<!-- Claude adds entries here as the project evolves -->
+### Never sign commits with "Co-Authored-By: Claude"
+**What happened:** Auto-signed commits with Claude co-author tag.
+**Root cause:** Default commit template includes co-author.
+**Rule:** Never add Co-Authored-By to commits in this project. User explicitly requested this.
+
+### Don't treat Lido as a primary strategy
+**What happened:** Initially listed Lido as strategy #1 in deployment order.
+**Root cause:** Classified it alongside real alpha strategies.
+**Rule:** Lido is background infrastructure (savings account), not a strategy. It runs silently on idle ETH. Never put it in the strategy pipeline table or deployment priority list.
+
+### X/Twitter trending has negative expected value — never deploy
+**What happened:** Research initially considered X trending as a viable signal.
+**Root cause:** Theoretical case seemed plausible.
+**Rule:** X/Twitter trending alone = -1% EV per trade. Permanently rejected. Do not reconsider without a major structural change (e.g., exclusive API access with <1s latency). Whale on-chain copy-trading (10-15 min lag) is the viable alternative.
+
+### node:sqlite instead of better-sqlite3
+**What happened:** better-sqlite3 failed to compile on Node.js 24 (C++20 issue).
+**Root cause:** Native module compilation incompatibility.
+**Rule:** Always use `node:sqlite` (built-in Node.js 22+). No native dependencies for SQLite.
+
+### Use .cjs extension for hardhat config in ESM projects
+**What happened:** Hardhat config needs to be CommonJS, but package.json has "type": "module".
+**Root cause:** ESM projects treat all .js files as ESM.
+**Rule:** Name the hardhat config `hardhat.config.cjs` in projects with `"type": "module"` in package.json.
+
+### Read files before Write tool
+**What happened:** Write tool failed on existing files that hadn't been Read first.
+**Root cause:** Write tool requires prior Read of existing files.
+**Rule:** Always Read a file before using Write or Edit on it. Use Edit for modifications, Write only for new files or full rewrites after Reading.
+
+### Arbitrum is the primary liquidation bot target, not mainnet
+**What happened:** N/A — learned from research phase.
+**Root cause:** N/A.
+**Rule:** Liquidation bot runs on Arbitrum (lower gas, less competition per playbook). Ethereum mainnet is secondary. Always use `ARBITRUM_RPC_URL` and `arbitrum` chain for liquidation strategy code.
+
+### Fetch ethskills security module before writing contract interaction code
+**What happened:** CLAUDE.md requires this; skipping it risks introducing vulnerabilities.
+**Root cause:** Security module documents known Solidity attack patterns (reentrancy, oracle manipulation, etc.).
+**Rule:** Before writing ANY Solidity or contract-interaction TypeScript, fetch https://ethskills.com/security/SKILL.md and apply its patterns:
+  - Use SafeERC20 for all token operations
+  - Verify msg.sender in flash loan callbacks
+  - Only approve necessary amounts (not infinite)
+  - Use amountOutMinimum in Uniswap swaps (slippage protection)
+  - Follow Checks-Effects-Interactions pattern
+
+### LiquidationBot contract key design decisions
+**What happened:** N/A — captured for future reference.
+**Root cause:** N/A.
+**Rule:** When modifying LiquidationBot.sol:
+  - `flashLoanSimple` (not `flashLoan`) — only one asset at a time, cleaner
+  - `type(uint256).max` as debtToCover — let Aave determine close factor
+  - `executeOperation` must verify `msg.sender == pool` AND `initiator == address(this)`
+  - Use `forceApprove` (SafeERC20) not `approve` — handles non-standard tokens like USDT
+  - No deadline in Uniswap SwapRouter02 (it was removed; use SwapRouter02 not SwapRouter)
+  - Profit accumulates in contract; owner calls `withdraw()` separately

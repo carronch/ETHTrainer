@@ -25,6 +25,12 @@ const ConfigSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_CHAT_ID: z.string().min(1),
 
+  // Arbitrum (for liquidation bot)
+  ARBITRUM_RPC_URL: z.string().url().optional(),
+
+  // Deployed contracts
+  LIQUIDATION_BOT_ADDRESS: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+
   // Agent config
   OBSIDIAN_VAULT_PATH: z.string().optional(),
   TRADING_WALLET_FLOOR_ETH: z.coerce.number().default(0.5),

@@ -52,7 +52,7 @@ export function updateTradeConfirmed(txHash: string, status: 'confirmed' | 'fail
 export function getTradesByStrategy(strategy: string, limit = 100): Trade[] {
   const db = getDb()
   return db.prepare(`SELECT * FROM trades WHERE strategy = ? ORDER BY created_at DESC LIMIT ?`)
-    .all(strategy, limit) as Trade[]
+    .all(strategy, limit) as unknown as Trade[]
 }
 
 // ── Strategies ────────────────────────────────────────────────────────────────
@@ -97,12 +97,12 @@ export function upsertStrategy(strategy: Strategy): void {
 
 export function getStrategy(name: string): Strategy | null {
   const db = getDb()
-  return db.prepare(`SELECT * FROM strategies WHERE name = ?`).get(name) as Strategy | null
+  return db.prepare(`SELECT * FROM strategies WHERE name = ?`).get(name) as unknown as Strategy | null
 }
 
 export function getAllStrategies(): Strategy[] {
   const db = getDb()
-  return db.prepare(`SELECT * FROM strategies ORDER BY total_profit_eth DESC`).all() as Strategy[]
+  return db.prepare(`SELECT * FROM strategies ORDER BY total_profit_eth DESC`).all() as unknown as Strategy[]
 }
 
 export function updateStrategyStats(name: string, won: boolean, profitEth: number): void {
