@@ -249,23 +249,33 @@ Keystore file: `~/.ethtrainer/keystore.json` (outside repo, password in macOS Ke
 
 ## Current Focus / Active Work
 
-**Phase 0 — Setup (current)**
-- [ ] Rename package, initialize TypeScript project
-- [ ] Set up SQLite schema
-- [ ] Set up encrypted keystore + macOS Keychain integration
-- [ ] Connect to own Ethereum node (Holesky)
-- [ ] Set up pm2
-- [ ] Set up Telegram alert bot
-- [ ] Build MungerAgent (load Obsidian vault → train on Munger mental models)
+**Phase 0 — Setup: COMPLETE**
 
-**Phase 1 — First Strategy**
-- [ ] ResearcherAgent: deep research on MEV and Polymarket opportunities
-- [ ] Backtest top candidates
-- [ ] MungerAgent review
-- [ ] Testnet deployment
+**Phase 1 — Strategy Research: IN PROGRESS**
+
+| Strategy | Status | Munger | Confidence |
+|----------|--------|--------|-----------|
+| Liquidation Bots (Aave) | Backtesting needed | APPROVED | 0.70 |
+| Polymarket Info Edge | Signal research needed | APPROVED (conditional) | 0.55 |
+| Derivatives / Liquidity Pockets | Research | Pending | TBD |
+| Trending coins + unusual volume | Research | Pending | TBD |
+| Zero-value projects (short via derivatives) | Research | Pending | TBD |
+| Lido stETH (idle yield) | Ready to implement | APPROVED | 0.90 |
+
+## Capital Architecture
+```
+Trading wallet (ETH)
+├── Active: Liquidation bots (primary alpha)
+├── Active: Polymarket info edge (secondary, Polygon)
+├── Active: Derivatives / liquidity pockets (tertiary)
+└── Idle: Lido stETH (3.8% APY on capital at rest)
+    ↓ 25% of profits, weekly sweep
+Treasury cold wallet → accumulates to 32 ETH → validator
+```
 
 ## Known Issues / Constraints
 
-- Cloudflare Workers references in template (`wrangler.toml`) are irrelevant — this runs on Mac Mini Node.js. Remove or repurpose.
-- Own Ethereum node must be synced before agents can operate.
-- Holesky testnet ETH needed for testing (free from faucets).
+- Own Ethereum node not yet set up — use Alchemy/Infura to start
+- Polymarket requires Polygon RPC + USDC bridging (not yet implemented)
+- Liquidation bot smart contract not yet written
+- Derivatives strategy still in research phase

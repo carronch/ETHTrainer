@@ -10,6 +10,7 @@
     "build": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
+    "research": "tsx scripts/research.ts",
     "backtest": "tsx scripts/backtest.ts",
     "setup-wallet": "tsx scripts/setup-wallet.ts"
   },

@@ -27,7 +27,7 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
 # ── Agent Config ──────────────────────────────────────
-OBSIDIAN_VAULT_PATH=/Users/YOUR_USERNAME/path/to/obsidian/vault
+OBSIDIAN_VAULT_PATH=/Users/treeseedtreeseed/Documents/Obsidian Vault/Charlie Munger's Mental Models
 TRADING_WALLET_FLOOR_ETH=0.5
 TREASURY_SWEEP_PCT=25
 TREASURY_SWEEP_MIN_ETH=0.05
