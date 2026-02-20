@@ -251,24 +251,40 @@ Keystore file: `~/.ethtrainer/keystore.json` (outside repo, password in macOS Ke
 
 **Phase 0 — Setup: COMPLETE**
 
-**Phase 1 — Strategy Research: IN PROGRESS**
+**Phase 1 — Strategy Research: COMPLETE**
+**Phase 2 — Implementation: STARTING**
 
-| Strategy | Status | Munger | Confidence |
-|----------|--------|--------|-----------|
-| Liquidation Bots (Aave) | Backtesting needed | APPROVED | 0.70 |
-| Polymarket Info Edge | Signal research needed | APPROVED (conditional) | 0.55 |
-| Derivatives / Liquidity Pockets | Research | Pending | TBD |
-| Trending coins + unusual volume | Research | Pending | TBD |
-| Zero-value projects (short via derivatives) | Research | Pending | TBD |
-| Lido stETH (idle yield) | Ready to implement | APPROVED | 0.90 |
+### Strategy Pipeline
+
+| Strategy | Status | Munger Verdict | Confidence | Playbook |
+|----------|--------|----------------|------------|---------|
+| Lido stETH (idle yield) | Ready to implement | APPROVED | 0.90 | `lido_idle_yield.md` |
+| Liquidation Bots (Aave) | Backtesting needed | APPROVED | 0.70 | `liquidation_bots.md` |
+| Delta-Neutral Funding Arb | Backtesting needed | APPROVED | 0.75 | `derivatives_delta_neutral.md` |
+| Polymarket Info Edge | Signal validation needed | APPROVED (conditional) | 0.55 | `polymarket_info_edge.md` |
+| Whale Copy-Trading | Watchlist validation needed | APPROVED (conditional) | 0.55 | `trending_coins_whale_tracking.md` |
+| Zero-Value Project Shorts | Scoring backtest needed | APPROVED (conditional) | 0.60 | `zero_value_shorts.md` |
+| Liquidation Cascade Detection | Backtest 6 months data | CONDITIONAL | 0.45 | `derivatives_delta_neutral.md` |
+| X/Twitter Trending Coins | — | REJECTED (negative EV) | 0.20 | See trending_coins playbook |
+
+### Deployment Order
+1. **Lido stETH** — deploy now (no additional research needed)
+2. **Delta-Neutral Funding Arb** — build dYdX/Hyperliquid client, backtest 90 days funding data, deploy
+3. **Liquidation Bots** — build Aave monitor, backtest 90 days, deploy on Arbitrum
+4. **Zero-Value Shorts** — build scoring system, backtest 2022–2024, deploy small positions
+5. **Whale Copy-Trading** — build watchlist + backtest, deploy at 1% position size
+6. **Polymarket** — requires Polygon bridging + validated signal edges
+7. **Cascade Detection** — monitoring mode only until 50+ events validated
 
 ## Capital Architecture
 ```
 Trading wallet (ETH)
-├── Active: Liquidation bots (primary alpha)
-├── Active: Polymarket info edge (secondary, Polygon)
-├── Active: Derivatives / liquidity pockets (tertiary)
-└── Idle: Lido stETH (3.8% APY on capital at rest)
+├── Primary: Liquidation bots (Aave, Arbitrum) — deterministic flash loan arbitrage
+├── Secondary: Delta-neutral funding arb (dYdX/Hyperliquid) — 20-30% APY yield
+├── Secondary: Whale copy-trading (on-chain smart money, Half-Kelly, 3% per trade)
+├── Defensive: Zero-value project shorts (Hyperliquid perps, 2% per position, hedge)
+├── Research: Polymarket info edge (Polygon, pending signal validation)
+└── Idle: Lido stETH (3.8% APY on unwrapped capital above 0.5 ETH floor)
     ↓ 25% of profits, weekly sweep
 Treasury cold wallet → accumulates to 32 ETH → validator
 ```
@@ -278,4 +294,6 @@ Treasury cold wallet → accumulates to 32 ETH → validator
 - Own Ethereum node not yet set up — use Alchemy/Infura to start
 - Polymarket requires Polygon RPC + USDC bridging (not yet implemented)
 - Liquidation bot smart contract not yet written
-- Derivatives strategy still in research phase
+- dYdX/Hyperliquid API client not yet built
+- Whale watchlist not yet validated (needs 6 months historical backtest)
+- Zero-value scoring system not yet built (needs backtest on 2022–2024 collapses)
