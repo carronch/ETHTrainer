@@ -254,37 +254,39 @@ Keystore file: `~/.ethtrainer/keystore.json` (outside repo, password in macOS Ke
 **Phase 1 — Strategy Research: COMPLETE**
 **Phase 2 — Implementation: STARTING**
 
-### Strategy Pipeline
+### Lido stETH — Savings Account (Not a Strategy)
+Lido is NOT a strategy. It is **background infrastructure**. Any ETH sitting idle above the 0.5 ETH gas floor gets staked automatically. Capital that's working in a real strategy gets unstaked when needed. This runs silently in the background — no agent decision required.
+
+### Alpha Strategy Pipeline
 
 | Strategy | Status | Munger Verdict | Confidence | Playbook |
 |----------|--------|----------------|------------|---------|
-| Lido stETH (idle yield) | Ready to implement | APPROVED | 0.90 | `lido_idle_yield.md` |
 | Liquidation Bots (Aave) | Backtesting needed | APPROVED | 0.70 | `liquidation_bots.md` |
 | Delta-Neutral Funding Arb | Backtesting needed | APPROVED | 0.75 | `derivatives_delta_neutral.md` |
-| Polymarket Info Edge | Signal validation needed | APPROVED (conditional) | 0.55 | `polymarket_info_edge.md` |
-| Whale Copy-Trading | Watchlist validation needed | APPROVED (conditional) | 0.55 | `trending_coins_whale_tracking.md` |
 | Zero-Value Project Shorts | Scoring backtest needed | APPROVED (conditional) | 0.60 | `zero_value_shorts.md` |
+| Whale Copy-Trading | Watchlist validation needed | APPROVED (conditional) | 0.55 | `trending_coins_whale_tracking.md` |
+| Polymarket Info Edge | Signal validation needed | APPROVED (conditional) | 0.55 | `polymarket_info_edge.md` |
 | Liquidation Cascade Detection | Backtest 6 months data | CONDITIONAL | 0.45 | `derivatives_delta_neutral.md` |
-| X/Twitter Trending Coins | — | REJECTED (negative EV) | 0.20 | See trending_coins playbook |
+| X/Twitter Trending Coins | — | REJECTED (negative EV) | — | See trending_coins playbook |
 
 ### Deployment Order
-1. **Lido stETH** — deploy now (no additional research needed)
+1. **Liquidation Bots** — build Aave monitor, backtest 90 days, start on Arbitrum (lower gas, less competition)
 2. **Delta-Neutral Funding Arb** — build dYdX/Hyperliquid client, backtest 90 days funding data, deploy
-3. **Liquidation Bots** — build Aave monitor, backtest 90 days, deploy on Arbitrum
-4. **Zero-Value Shorts** — build scoring system, backtest 2022–2024, deploy small positions
-5. **Whale Copy-Trading** — build watchlist + backtest, deploy at 1% position size
-6. **Polymarket** — requires Polygon bridging + validated signal edges
-7. **Cascade Detection** — monitoring mode only until 50+ events validated
+3. **Zero-Value Shorts** — build worthlessness scoring system, backtest 2022–2024 collapses, deploy small
+4. **Whale Copy-Trading** — build watchlist + 6-month backtest, deploy at 1% position size
+5. **Polymarket** — requires Polygon bridging + validated signal edges
+6. **Cascade Detection** — monitoring mode only until 50+ real events validated; trade last
 
 ## Capital Architecture
 ```
 Trading wallet (ETH)
-├── Primary: Liquidation bots (Aave, Arbitrum) — deterministic flash loan arbitrage
-├── Secondary: Delta-neutral funding arb (dYdX/Hyperliquid) — 20-30% APY yield
-├── Secondary: Whale copy-trading (on-chain smart money, Half-Kelly, 3% per trade)
-├── Defensive: Zero-value project shorts (Hyperliquid perps, 2% per position, hedge)
-├── Research: Polymarket info edge (Polygon, pending signal validation)
-└── Idle: Lido stETH (3.8% APY on unwrapped capital above 0.5 ETH floor)
+├── Primary: Liquidation bots (Aave, Arbitrum) — deterministic flash loan alpha
+├── Primary: Delta-neutral funding arb (dYdX/Hyperliquid) — 20–30% APY, near-zero risk
+├── Active: Whale copy-trading (on-chain smart money, Half-Kelly, 3% per trade)
+├── Active: Zero-value project shorts (Hyperliquid perps, 2% per position)
+├── Active: Polymarket info edge (Polygon, pending signal validation)
+├── Research: Liquidation cascade detection (monitoring only until validated)
+└── Savings: Lido stETH (3.8% APY on ALL idle ETH — runs automatically in background)
     ↓ 25% of profits, weekly sweep
 Treasury cold wallet → accumulates to 32 ETH → validator
 ```

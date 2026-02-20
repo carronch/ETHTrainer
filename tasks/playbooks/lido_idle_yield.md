@@ -1,8 +1,8 @@
 # Playbook: Lido stETH — Idle Capital Yield
 
-**Status:** APPROVED → Ready to deploy (lowest risk, highest automation)
+**Status:** SAVINGS ACCOUNT — always-on background yield, not a strategy
 **Munger verdict:** APPROVED (unconditionally)
-**Confidence:** 0.90
+**Confidence:** 0.90 — irrelevant, this is infrastructure not alpha
 
 ---
 
