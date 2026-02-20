@@ -50,3 +50,12 @@ logs/
 # Misc
 *.tmp
 *.cache
+
+# ETHTrainer — Keystores & DB
+*.key
+*.pem
+keystore.json
+*.db
+*.sqlite
+pm2-logs/
+*.tsbuildinfo

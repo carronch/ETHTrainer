@@ -1,9 +1,13 @@
-# Project
+# ETHTrainer
 
-> One-line description of the project.
-> Tip: paste `docs/ai-setup-prompt.md` to Claude or Gemini and it will interview you and generate this file.
+> A hierarchical AI agent system that operates autonomously on Ethereum to accumulate 32 ETH and spin up a validator.
+
+## What It Does
+
+ETHTrainer deploys a master AI agent that spawns specialized sub-agents (researcher, strategist, executor, risk manager) to find and exploit profitable on-chain opportunities — MEV, Polymarket asymmetric bets, yield strategies, and more. All profits are split between a compounding trading account and a sacred treasury wallet. When the treasury reaches 32 ETH, an Ethereum validator is spun up. The system learns from every trade, backtests every strategy before deploying capital, and grows smarter over time.
 
 ## Workflow Orchestration
+
 ### Plan Mode Default
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - If something goes sideways, STOP and re-plan immediately — don't keep pushing
@@ -11,39 +15,33 @@
 - Write detailed specs upfront to reduce ambiguity
 
 ### Subagent Strategy
-
 - Use subagents liberally to keep main context window clean
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
 
 ### Self-Improvement Loop
-
 - After ANY correction from the user: update tasks/lessons.md with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
 
 ### Verification Before Done
-
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
 
 ### Demand Elegance (Balanced)
-
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
 - Skip this for simple, obvious fixes — don't over-engineer
 - Challenge your own work before presenting it
 
 ### Autonomous Bug Fixing
-
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests — then resolve them
 - Zero context switching required from the user
-- Go fix failing CI tests without being told how
 
 ## Task Management
 
@@ -62,10 +60,85 @@
 
 ## Stack
 
-- **Frontend:** <!-- e.g. Astro + Tailwind, React, plain HTML -->
-- **Backend:** <!-- e.g. Cloudflare Workers, Node -->
-- **Database:** <!-- e.g. Cloudflare D1, none -->
-- **Deployment:** Cloudflare
+- **Language:** TypeScript
+- **Runtime:** Node.js on always-on Mac Mini
+- **Agent Framework:** Inspired by pi-mono (`@mariozechner/pi-agent-core`) — modular, skill-based, multi-LLM
+- **Ethereum:** viem (chain interaction), own Ethereum node (MEV/Flashbots access)
+- **Database:** SQLite (local, persistent — agent state, trade history, strategy performance)
+- **Process Manager:** pm2 (always-on, auto-restart, log management)
+- **AI Layer:** Multi-model — Claude (Anthropic) + OpenAI, model chosen per task
+- **Alerts:** Telegram bot
+- **Network:** Holesky testnet → Ethereum mainnet
+
+## Ethereum Knowledge Base
+
+Before writing any Ethereum code, fetch the relevant ethskills module:
+
+| Topic | URL |
+|-------|-----|
+| Orientation | https://ethskills.com/ship/SKILL.md |
+| Core concepts | https://ethskills.com/concepts/SKILL.md |
+| Wallets & key mgmt | https://ethskills.com/wallets/SKILL.md |
+| Gas & costs | https://ethskills.com/gas/SKILL.md |
+| Security | https://ethskills.com/security/SKILL.md |
+| Standards (ERC-20 etc) | https://ethskills.com/standards/SKILL.md |
+| DeFi building blocks | https://ethskills.com/building-blocks/SKILL.md |
+| Addresses | https://ethskills.com/addresses/SKILL.md |
+| Testing | https://ethskills.com/testing/SKILL.md |
+| Orchestration | https://ethskills.com/orchestration/SKILL.md |
+| Tools | https://ethskills.com/tools/SKILL.md |
+| Indexing | https://ethskills.com/indexing/SKILL.md |
+| L2s | https://ethskills.com/l2s/SKILL.md |
+
+## Agent Architecture
+
+### Hierarchy
+```
+MasterAgent
+├── MungerAgent          ← Strategic advisor, trained on Obsidian vault (Charlie Munger mental models)
+├── ResearcherAgent      ← Finds on-chain opportunities, pulls data, backtests
+├── StrategistAgent      ← Evaluates opportunities, builds playbooks
+├── ExecutorAgent        ← Signs and submits transactions (trading wallet only)
+└── RiskManagerAgent     ← Monitors positions, enforces hard limits, triggers alerts
+```
+
+### Agent Capabilities (pi-skills pattern)
+Each agent has a set of skills (modular, self-contained). Skills are added as the system discovers new opportunities.
+
+### MungerAgent — First Agent to Build
+- Trained from user's Obsidian vault (Charlie Munger mental models)
+- Consulted before any new strategy is approved
+- Applies: inversion, circle of competence, margin of safety, lollapalooza effect
+- Can veto strategies the other agents propose
+
+## Wallet System
+
+### Two-Wallet Architecture
+- **Trading Wallet** (agent-controlled): Encrypted JSON keystore on Mac Mini. Password stored in macOS Keychain. Agent unlocks at runtime via Keychain CLI. Never in plaintext, never in Git.
+- **Treasury Wallet** (cold, offline): Receive-only address known to the system. Key stored offline (hardware wallet). Agent can ONLY send TO this address, never read the key, never spend from it.
+
+### Treasury Sweep Rules
+- Sweep **25% of net profit** per winning cycle
+- **Minimum sweep threshold**: 0.05 ETH (don't sweep tiny amounts — gas efficiency)
+- **Trading wallet floor**: 0.5 ETH minimum — never sweep if balance would drop below this
+- **Sweep cadence**: Weekly batch (minimize gas costs)
+- **Goal**: Treasury reaches 32 ETH → validator activation
+
+## Backtesting & Learning System
+
+### Before Any Strategy Goes Live
+1. ResearcherAgent pulls historical on-chain data for the strategy's target domain
+2. Strategy is backtested against historical data — must show positive expected value
+3. MungerAgent reviews backtest results with skepticism (survivorship bias, overfitting checks)
+4. StrategistAgent writes a playbook entry in `tasks/playbooks/`
+5. Strategy runs on Holesky testnet first
+6. Only after testnet validation does ExecutorAgent get authorization for mainnet
+
+### Learning Loop
+- After every trade cycle: agent logs outcome to SQLite
+- Weekly: system reviews win/loss patterns, updates strategy confidence scores
+- Losing strategies are flagged, paused, and re-evaluated
+- Winning strategies get increased allocation (Kelly Criterion-informed sizing)
 
 ## Commands
 
@@ -73,138 +146,126 @@
 # Install dependencies
 npm install
 
-# Local development
+# Local development (testnet)
 npm run dev
 
-# Deploy to Cloudflare
-npm run deploy
+# Run master agent
+npm run agent
 
-# Run scripts manually
+# pm2 — keep agent alive
+pm2 start npm --name ethtrainer -- run agent
+pm2 save
+pm2 startup   # auto-start on Mac Mini reboot
+
+# Run tests
+npm test
+
+# Backtest a strategy
+node scripts/backtest.js <strategy-name>
+
+# Run specific scripts
 node scripts/<script-name>.js
 ```
 
 ## Architecture
 
-> Describe the key structure decisions here. What are the main pieces and how do they connect?
+### Key Folders
+```
+src/
+  agents/         ← agent implementations (master, munger, researcher, etc.)
+  skills/         ← modular skill plugins (pi-skills pattern)
+  executor/       ← transaction signing and submission via viem
+  wallet/         ← keystore management, Keychain integration
+  db/             ← SQLite schema, queries, migrations
+  telegram/       ← alert bot
+  backtester/     ← historical data fetching and strategy simulation
+scripts/          ← one-off operational scripts
+tasks/
+  todo.md         ← active work
+  lessons.md      ← AI self-improvement log
+  playbooks/      ← validated strategy playbooks
+docs/
+  spec.md         ← feature spec template
+```
 
 ## Key Files
 
-> List files the AI should pay attention to before making changes.
+- `wrangler.toml` — remove or repurpose (not deploying to Cloudflare)
+- `src/agents/master.ts` — top-level orchestrator
+- `src/agents/munger.ts` — strategic advisor (first agent to build)
+- `src/wallet/keystore.ts` — encrypted key management
+- `src/db/schema.ts` — SQLite schema
+- `src/executor/index.ts` — viem transaction layer
 
-- `wrangler.toml` — Cloudflare configuration
-- `src/index.js` — main entry point
+## Secrets & Environment
+
+All secrets live in `.dev.vars` locally (gitignored). Never in code, never committed.
+
+```
+# .dev.vars (never commit this)
+KEYSTORE_PASSWORD=<unlocks encrypted JSON keystore>
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+ETH_RPC_URL=http://localhost:8545    # own node
+ETH_RPC_URL_WS=ws://localhost:8546   # websocket for mempool
+TREASURY_ADDRESS=<cold wallet receive address>
+```
+
+Keystore file: `~/.ethtrainer/keystore.json` (outside repo, password in macOS Keychain)
 
 ## Rules
 
-- Do not commit `.env` or `.dev.vars`
-- Don't use localStorage (use Cloudflare KV or D1 instead)
-- Don't hardcode API keys
-- Do not add external automation tools — put scripts in `scripts/`
-- Keep dependencies minimal
-- Don't create huge monolithic components
-- Deploy only via CLI or CI, never the dashboard
+- **NEVER** touch the treasury wallet private key — it is offline. Agent only knows the address.
+- **NEVER** spend from the treasury wallet — only deposit into it.
+- **NEVER** commit `.dev.vars`, `*.key`, `*.pem`, or keystore files.
+- **NEVER** hardcode private keys, addresses, or API keys in source code.
+- **NEVER** deploy a strategy to mainnet without: backtest → MungerAgent review → testnet run.
+- Do not use localStorage — use SQLite.
+- Keep dependencies minimal.
+- All scripts go in `scripts/` — no external automation tools.
+- Validate all Ethereum addresses using viem's `getAddress()` before any transaction.
+- Human confirmation required before any mainnet transaction over 1 ETH.
+- Trading wallet floor: never drop below 0.5 ETH in trading wallet.
 
 ## Coding Rules
-### For Astro (remove if not using Astro)
 
-- One component = one responsibility (Nav, Hero, Features, CTA, Footer — never merge them)
-- Data and logic go in frontmatter (---), markup below
-- Avoid JavaScript unless strictly necessary — Astro is HTML-first
-- New page = new file in src/pages/. That's it, no router config needed
-- Always wrap pages with <BaseLayout> from src/layouts/BaseLayout.astro
+### TypeScript
+- Strict mode enabled
+- No `any` types
+- All async functions have explicit error handling
+- Every transaction is logged to SQLite before and after submission
 
-### Tailwind + CSS (remove if not using Tailwind)
+### Agent Skills (pi-skills pattern)
+- Each skill is self-contained in `src/skills/<skill-name>/`
+- Every skill has a `SKILL.md` describing what it does and when to use it
+- Skills are composable — agents pick the skills they need
 
-- Use Tailwind for layout, spacing, and responsive breakpoints
-- Use CSS variables from global.css for brand colors and fonts — never hardcode hex values
-- Never use style="" attributes except for animation-delay staggering
-- Mobile-first: always write sm: / md: / lg: variants
+### Security
+- Fetch `https://ethskills.com/security/SKILL.md` before writing any contract interaction code
+- Validate all external data before acting on it
+- Never trust mempool data blindly
 
-### Frontend Design Standards
-- ⚠️ This section is critical. Apply it every time you touch UI.
-- The Prime Directive
-- Never produce generic AI-looking UI. Every interface must have a clear,
-- committed aesthetic point-of-view. "Clean and modern" is not an aesthetic.
-- Choose a direction and execute it with precision.
-- Before writing any UI code, answer these three questions:
+## Current Focus / Active Work
 
-### What is the aesthetic direction?
-- Pick one: brutally minimal / maximalist / retro-futuristic / organic / luxury /
-editorial / brutalist / art-deco / soft-pastel / industrial / playful / dark-tech
-- then commit fully. Do not blend without intention.
+**Phase 0 — Setup (current)**
+- [ ] Rename package, initialize TypeScript project
+- [ ] Set up SQLite schema
+- [ ] Set up encrypted keystore + macOS Keychain integration
+- [ ] Connect to own Ethereum node (Holesky)
+- [ ] Set up pm2
+- [ ] Set up Telegram alert bot
+- [ ] Build MungerAgent (load Obsidian vault → train on Munger mental models)
 
-### What makes this component UNFORGETTABLE?
-- One thing. Nail it. Everything else supports it.
-- Does every detail serve the direction?
-- Spacing, font weight, border radius, color — nothing is default.
+**Phase 1 — First Strategy**
+- [ ] ResearcherAgent: deep research on MEV and Polymarket opportunities
+- [ ] Backtest top candidates
+- [ ] MungerAgent review
+- [ ] Testnet deployment
 
-### Typography
+## Known Issues / Constraints
 
-- Always pair a distinctive display font with a refined body font
-- Banned fonts: Inter, Roboto, Arial, system-ui, Space Grotesk, Helvetica
-- Good display choices (pick based on aesthetic): Fraunces, Cabinet Grotesk,
-Bebas Neue, Cormorant Garamond, Syne, Clash Display, Neue Haas Grotesk,
-Editorial New, Instrument Serif, PP Mondwest
-- Good body choices: DM Sans, Söhne, Switzer, General Sans, Satoshi
-- Font size hierarchy must be dramatic — headings should feel large, body text calm
-- Use font-display and font-body CSS variables, never hardcode font names in components
-
-### Color
-
-- Pick a dominant color and one sharp accent. Two colors > six colors.
-- Dark backgrounds are often more striking than light ones — don't default to white
-- Avoid: purple-on-white, blue-on-white, generic SaaS teal
-- Use CSS custom properties: --color-brand-* tokens in global.css
-- Gradients: use sparingly and purposefully — gradient mesh or noise overlay > generic linear
-
-### Layout & Composition
-
-- Break the grid intentionally — asymmetry, overlapping elements, diagonal flow
-- Generous negative space OR controlled density — pick one, not the muddy middle
-- Hero sections: avoid centered text + button on white — try offset layouts, oversized
-type, full-bleed imagery, or text that bleeds off screen
-- Feature grids: 3-col is the last resort. Try alternating rows, large + small mixed,
-horizontal scrollers, or a single spotlight layout
-
-### Motion & Interaction
-
-- Page load: one orchestrated staggered reveal is worth more than 10 scattered animations
-- Hover states must feel considered — not just opacity-80. Try: scale + shadow,
-color shift, underline draw, border reveal, background slide
-- CSS-only animations preferred. Use @keyframes in global.css
-- Do NOT add animation just to add animation — every motion must have a reason
-
-### Backgrounds & Texture
-
-- Flat white/gray backgrounds are the enemy. Add depth:
-- Noise texture overlay (SVG filter or CSS)
-- Gradient mesh
-- Subtle geometric pattern
-- Layered transparency with backdrop-filter
-- Grain overlay via ::before pseudo-element
-- Shadows: use layered, colored shadows over box-shadow: 0 4px 6px rgba(0,0,0,0.1)
-
-### What "Production-Grade" Means Here
-
-- Every component works on mobile, tablet, and desktop
-- Images use Astro's <Image> component for optimization
-- Interactive elements have visible focus states (accessibility)
-- Text contrast passes WCAG AA minimum
-- No layout shift on load
-
-### When I Ask You to Build a Component
-
-- State your aesthetic direction out loud before writing code
-- Justify the font pairing choice
-- Write the complete .astro file — no partial snippets
-- Include responsive variants for all breakpoints
-- Show the import line to add it to index.astro
-- Flag any new npm packages needed
-
-## Current focus / active work
-
-<!-- Update this regularly so the AI knows what you're working on -->
-
-## Known issues / constraints
-
-<!-- List any known bugs or limitations the AI should be aware of -->
+- Cloudflare Workers references in template (`wrangler.toml`) are irrelevant — this runs on Mac Mini Node.js. Remove or repurpose.
+- Own Ethereum node must be synced before agents can operate.
+- Holesky testnet ETH needed for testing (free from faucets).

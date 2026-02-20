@@ -1,11 +1,33 @@
-# Wrangler reads this file for local development (wrangler dev)
-# Copy to .dev.vars and fill in values — never commit .dev.vars
-#
-# To set production secrets:
-#   wrangler secret put SECRET_NAME
+# Copy this to .dev.vars and fill in your values.
+# NEVER commit .dev.vars to git.
 
-# AI (only if your app calls AI APIs at runtime)
-# ANTHROPIC_API_KEY=
-# GEMINI_API_KEY=
+# ── AI ────────────────────────────────────────────────
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
 
-# Add your project-specific secrets below
+# ── Ethereum ──────────────────────────────────────────
+ETH_RPC_URL=http://localhost:8545
+ETH_RPC_URL_WS=ws://localhost:8546
+NETWORK=holesky
+
+# ── Wallet ────────────────────────────────────────────
+# Path to encrypted JSON keystore file (outside repo)
+KEYSTORE_PATH=/Users/YOUR_USERNAME/.ethtrainer/keystore.json
+# Password stored in macOS Keychain — set it once with:
+# security add-generic-password -s ETHTrainer -a trading_wallet -w "your_password"
+KEYCHAIN_SERVICE=ETHTrainer
+KEYCHAIN_ACCOUNT=trading_wallet
+
+# ── Treasury ──────────────────────────────────────────
+# Cold wallet address — agent can ONLY send TO this, never spend from it
+TREASURY_ADDRESS=0x
+
+# ── Telegram ──────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# ── Agent Config ──────────────────────────────────────
+OBSIDIAN_VAULT_PATH=/Users/YOUR_USERNAME/path/to/obsidian/vault
+TRADING_WALLET_FLOOR_ETH=0.5
+TREASURY_SWEEP_PCT=25
+TREASURY_SWEEP_MIN_ETH=0.05
