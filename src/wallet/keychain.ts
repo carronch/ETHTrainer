@@ -4,6 +4,14 @@ import { execSync } from 'node:child_process'
 // No native modules required — works on every Mac out of the box.
 
 export function getKeychainPassword(service: string, account: string): string {
+  // On Linux (server): read from KEYSTORE_PASSWORD env var
+  if (process.platform !== 'darwin') {
+    const pw = process.env['KEYSTORE_PASSWORD']
+    if (!pw) throw new Error('KEYSTORE_PASSWORD not set in environment / .dev.vars')
+    return pw
+  }
+
+  // On macOS: use Keychain
   try {
     const password = execSync(
       `security find-generic-password -s "${service}" -a "${account}" -w`,

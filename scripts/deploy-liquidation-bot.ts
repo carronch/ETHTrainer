@@ -16,7 +16,7 @@ import { arbitrum } from 'viem/chains'
 import { config as loadDotenv } from 'dotenv'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { getTradingAccount } from '../src/wallet/keystore.js'
+import { loadTradingWallet, getTradingAccount } from '../src/wallet/keystore.js'
 
 loadDotenv({ path: '.dev.vars' })
 
@@ -38,6 +38,8 @@ async function main() {
     throw new Error(`Artifact not found at ${artifactPath}. Run 'npm run compile' first.`)
   }
 
+  const keystorePath = (process.env['KEYSTORE_PATH'] ?? `${process.env['HOME']}/.ethtrainer/keystore.json`)
+  await loadTradingWallet(keystorePath, 'ethtrainer', 'trading-wallet')
   const account = getTradingAccount()
 
   const publicClient = createPublicClient({ chain: arbitrum, transport: http(rpcUrl) })
