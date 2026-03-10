@@ -12,10 +12,10 @@
 use crate::db::Db;
 use crate::types::MissedOpportunity;
 use alloy::{
-    network::AnyNetwork,
     primitives::Address,
     providers::Provider,
     sol,
+    sol_types::SolEvent,
 };
 use anyhow::Result;
 use chrono::Utc;
@@ -45,7 +45,7 @@ impl MissedTracker {
 
     /// Spawn a background task that watches for LiquidationCall events
     /// and logs the ones we missed.
-    pub fn spawn<P: Provider<AnyNetwork> + 'static>(
+    pub fn spawn<P: Provider + 'static>(
         &self,
         provider: Arc<P>,
         db: Arc<std::sync::Mutex<Db>>,
@@ -57,12 +57,13 @@ impl MissedTracker {
 
             let filter = alloy::rpc::types::Filter::new()
                 .address(pool)
-                .event_signature(LiquidationCall::SIGNATURE_HASH);
+                .event_signature(LiquidationCall::SELECTOR);
 
             match provider.subscribe_logs(&filter).await {
                 Ok(mut stream) => {
-                    use tokio_stream::StreamExt;
+                    use futures::StreamExt;
                     while let Some(log) = stream.next().await {
+                        let log: alloy::rpc::types::Log = log;
                         if let Ok(decoded) = log.log_decode::<LiquidationCall>() {
                             let event = decoded.data();
                             let borrower = event.user;

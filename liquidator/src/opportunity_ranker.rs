@@ -10,7 +10,6 @@
 use crate::config::HeuristicParams;
 use crate::types::{AccountData, LiquidationOpportunity, UserReserveData};
 use alloy::{
-    network::AnyNetwork,
     primitives::{Address, U256},
     providers::Provider,
     sol,
@@ -61,7 +60,7 @@ sol! {
 
 const FLASH_LOAN_FEE_BPS: u128 = 9; // 0.09%
 
-pub struct OpportunityRanker<P: Provider<AnyNetwork>> {
+pub struct OpportunityRanker<P: Provider> {
     provider: Arc<P>,
     pool: Address,
     data_provider: Address,
@@ -74,7 +73,7 @@ pub struct OpportunityRanker<P: Provider<AnyNetwork>> {
     reserves_cache: tokio::sync::RwLock<Option<Vec<Address>>>,
 }
 
-impl<P: Provider<AnyNetwork>> OpportunityRanker<P> {
+impl<P: Provider> OpportunityRanker<P> {
     pub fn new(
         provider: Arc<P>,
         pool: &str,
@@ -176,7 +175,7 @@ impl<P: Provider<AnyNetwork>> OpportunityRanker<P> {
 
         // Gas cost
         let gas_price = self.provider.get_gas_price().await?;
-        let gas_cost_wei = params.gas_estimate_liquidation as u128 * gas_price.to::<u128>();
+        let gas_cost_wei = params.gas_estimate_liquidation as u128 * gas_price;
 
         if profit_wei <= gas_cost_wei {
             debug!(borrower = ?account.address, "Skipping: profit < gas cost");
@@ -241,7 +240,7 @@ impl<P: Provider<AnyNetwork>> OpportunityRanker<P> {
             }
         }
         let pool = IAavePool::new(self.pool, self.provider.clone());
-        let list = pool.getReservesList().call().await?._0;
+        let list = pool.getReservesList().call().await?;
         let mut cache = self.reserves_cache.write().await;
         *cache = Some(list.clone());
         Ok(list)
@@ -252,10 +251,35 @@ impl<P: Provider<AnyNetwork>> OpportunityRanker<P> {
         user: Address,
         reserves: &[Address],
     ) -> Result<Vec<UserReserveData>> {
-        let dp = IDataProvider::new(self.data_provider, self.provider.clone());
+        let user_calls: Vec<_> = reserves
+            .iter()
+            .copied()
+            .map(|a| {
+                let provider = self.provider.clone();
+                let dp_addr = self.data_provider;
+                async move {
+                    IDataProvider::new(dp_addr, provider)
+                        .getUserReserveData(a, user)
+                        .call()
+                        .await
+                }
+            })
+            .collect();
 
-        let user_calls: Vec<_> = reserves.iter().map(|&a| dp.getUserReserveData(a, user).call()).collect();
-        let cfg_calls: Vec<_>  = reserves.iter().map(|&a| dp.getReserveConfigurationData(a).call()).collect();
+        let cfg_calls: Vec<_> = reserves
+            .iter()
+            .copied()
+            .map(|a| {
+                let provider = self.provider.clone();
+                let dp_addr = self.data_provider;
+                async move {
+                    IDataProvider::new(dp_addr, provider)
+                        .getReserveConfigurationData(a)
+                        .call()
+                        .await
+                }
+            })
+            .collect();
 
         let (user_results, cfg_results) = tokio::join!(
             futures::future::join_all(user_calls),
@@ -293,7 +317,7 @@ impl<P: Provider<AnyNetwork>> OpportunityRanker<P> {
 
     async fn get_prices(&self, reserves: &[Address]) -> Result<HashMap<Address, u128>> {
         let oracle = IAaveOracle::new(self.oracle, self.provider.clone());
-        let prices = oracle.getAssetsPrices(reserves.to_vec()).call().await?._0;
-        Ok(reserves.iter().copied().zip(prices.iter().map(|p| p.to::<u128>())).collect())
+        let prices = oracle.getAssetsPrices(reserves.to_vec()).call().await?;
+        Ok(reserves.iter().copied().zip(prices.iter().map(|p: &U256| p.to::<u128>())).collect())
     }
 }

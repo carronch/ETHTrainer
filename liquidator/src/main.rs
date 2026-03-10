@@ -27,7 +27,7 @@ use dotenvy::dotenv;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -116,7 +116,7 @@ async fn main() -> Result<()> {
     let keystore_password = std::env::var("KEYSTORE_PASSWORD")
         .context("KEYSTORE_PASSWORD not set — add it to .dev.vars")?;
 
-    let signer = alloy::signers::local::LocalSigner::decrypt_keystore(
+    let signer = alloy::signers::local::PrivateKeySigner::decrypt_keystore(
         &keystore_path,
         &keystore_password,
     )
@@ -137,7 +137,6 @@ async fn main() -> Result<()> {
 
     // HTTP provider for reads + tx submission
     let provider = alloy::providers::ProviderBuilder::new()
-        .network::<alloy::network::AnyNetwork>()
         .with_recommended_fillers()
         .wallet(alloy::network::EthereumWallet::from(signer))
         .connect_http(rpc_url.parse()?);
@@ -196,7 +195,6 @@ async fn main() -> Result<()> {
     // Best-effort — bot works without WS but won't pick up new borrowers in real-time.
     if let Some(ws_url) = rpc_ws_url {
         match alloy::providers::ProviderBuilder::new()
-            .network::<alloy::network::AnyNetwork>()
             .connect_ws(alloy::transports::ws::WsConnect::new(ws_url))
             .await
         {

@@ -11,11 +11,12 @@ use crate::config::HeuristicParams;
 use crate::db::Db;
 use crate::types::{LiquidationOpportunity, LiquidationResult};
 use alloy::{
-    network::{AnyNetwork, TransactionBuilder},
+    network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
     providers::{Provider, WalletProvider},
     rpc::types::TransactionRequest,
     sol,
+    sol_types::SolCall,
 };
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
@@ -69,7 +70,7 @@ impl CircuitBreaker {
     }
 }
 
-pub struct TxSubmitter<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> {
+pub struct TxSubmitter<P: Provider + WalletProvider> {
     provider: Arc<P>,
     bot_address: Address,
     pool_address: Address,
@@ -77,7 +78,7 @@ pub struct TxSubmitter<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> {
     circuit_breaker: std::sync::Mutex<CircuitBreaker>,
 }
 
-impl<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> TxSubmitter<P> {
+impl<P: Provider + WalletProvider> TxSubmitter<P> {
     pub fn new(provider: Arc<P>, bot_address: Address, pool_address: Address, shadow_mode: bool) -> Self {
         Self {
             provider,
@@ -129,7 +130,7 @@ impl<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> TxSubmitter<P> {
 
         // ── Pre-flight: gas price check ────────────────────────────────────────
         let gas_price = match self.provider.get_gas_price().await {
-            Ok(p) => p.to::<u128>(),
+            Ok(p) => p,
             Err(e) => {
                 error!("Failed to get gas price: {e}");
                 return self.fail_result(opp, "gas price fetch failed");
@@ -149,7 +150,7 @@ impl<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> TxSubmitter<P> {
             opp.debt_asset,
             opp.borrower,
             U256::from(opp.debt_to_cover),
-            opp.uniswap_pool_fee as u32,
+            alloy::primitives::Uint::<24, 1>::from(opp.uniswap_pool_fee as u16),
             U256::from(opp.min_profit_wei),
         );
 
@@ -192,12 +193,12 @@ impl<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> TxSubmitter<P> {
             .unwrap_or(0);
 
         let tx = call
-            .with_gas_limit(params.gas_estimate_liquidation + 100_000)
-            .with_gas_price(gas_price);
+            .gas(params.gas_estimate_liquidation + 100_000)
+            .gas_price(gas_price);
 
         match tx.send().await {
             Ok(pending) => {
-                let tx_hash = format!("{:?}", pending.tx_hash());
+                let tx_hash = pending.tx_hash().to_string();
                 info!(tx_hash, borrower = ?opp.borrower, "Tx submitted, waiting for receipt");
 
                 match pending.get_receipt().await {
@@ -273,8 +274,10 @@ impl<P: Provider<AnyNetwork> + WalletProvider<AnyNetwork>> TxSubmitter<P> {
         }
         // Raw eth_call for the health factor slot
         let calldata = getUserAccountDataCall { user: address }.abi_encode();
-        let req = TransactionRequest::default().to(self.pool_address).input(Bytes::from(calldata));
-        let result = self.provider.call(&req).await?;
+        let req = TransactionRequest::default()
+            .to(self.pool_address)
+            .with_input(Bytes::from(calldata));
+        let result = self.provider.call(req.into()).await?;
 
         // Health factor is the 6th return value (offset 5 * 32 = 160 bytes)
         if result.len() < 192 {

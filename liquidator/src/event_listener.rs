@@ -8,11 +8,11 @@
 
 use crate::db::Db;
 use alloy::{
-    network::AnyNetwork,
     primitives::Address,
     providers::Provider,
     rpc::types::{BlockNumberOrTag, Filter},
     sol,
+    sol_types::SolEvent,
 };
 use anyhow::Result;
 use std::sync::Arc;
@@ -43,7 +43,7 @@ impl EventListener {
     }
 
     /// Seed the watchlist from historical Borrow events (last 3 days).
-    pub async fn seed_from_history<P: Provider<AnyNetwork>>(
+    pub async fn seed_from_history<P: Provider>(
         &self,
         provider: &P,
         db: &Db,
@@ -61,7 +61,7 @@ impl EventListener {
 
             let filter = Filter::new()
                 .address(self.pool)
-                .event_signature(Borrow::SIGNATURE_HASH)
+                .event_signature(Borrow::SELECTOR)
                 .from_block(BlockNumberOrTag::Number(from))
                 .to_block(BlockNumberOrTag::Number(to));
 
@@ -89,7 +89,7 @@ impl EventListener {
     }
 
     /// Spawn a background task that watches for new Borrow events.
-    pub fn spawn_live_watch<P: Provider<AnyNetwork> + 'static>(
+    pub fn spawn_live_watch<P: Provider + 'static>(
         &self,
         provider: Arc<P>,
         db: Arc<std::sync::Mutex<Db>>,
@@ -101,12 +101,13 @@ impl EventListener {
 
             let filter = Filter::new()
                 .address(pool)
-                .event_signature(Borrow::SIGNATURE_HASH);
+                .event_signature(Borrow::SELECTOR);
 
             match provider.subscribe_logs(&filter).await {
                 Ok(mut stream) => {
-                    use tokio_stream::StreamExt;
+                    use futures::StreamExt;
                     while let Some(log) = stream.next().await {
+                        let log: alloy::rpc::types::Log = log;
                         if let Ok(decoded) = log.log_decode::<Borrow>() {
                             let borrower = decoded.data().onBehalfOf;
                             let block = log.block_number.unwrap_or(0);

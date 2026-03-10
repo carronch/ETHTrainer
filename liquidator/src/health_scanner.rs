@@ -6,7 +6,6 @@ use crate::config::HeuristicParams;
 use crate::db::Db;
 use crate::types::AccountData;
 use alloy::{
-    network::AnyNetwork,
     primitives::{Address, U256},
     providers::Provider,
     sol,
@@ -30,12 +29,12 @@ sol! {
     }
 }
 
-pub struct HealthScanner<P: Provider<AnyNetwork>> {
+pub struct HealthScanner<P: Provider> {
     provider: Arc<P>,
     pool: Address,
 }
 
-impl<P: Provider<AnyNetwork>> HealthScanner<P> {
+impl<P: Provider> HealthScanner<P> {
     pub fn new(provider: Arc<P>, pool_address: &str) -> Result<Self> {
         let pool: Address = pool_address.parse()?;
         Ok(Self { provider, pool })
@@ -112,16 +111,21 @@ impl<P: Provider<AnyNetwork>> HealthScanner<P> {
         let pool = IAavePool::new(self.pool, self.provider.clone());
         let mut out = Vec::with_capacity(addresses.len());
 
-        // alloy multicall: gather all calls
-        let calls: Vec<_> = addresses
+        // Execute concurrent calls via join_all
+        let futures: Vec<_> = addresses
             .iter()
-            .map(|&addr| pool.getUserAccountData(addr))
+            .copied()
+            .map(|addr| {
+                let provider = self.provider.clone();
+                let pool_addr = self.pool;
+                async move {
+                    IAavePool::new(pool_addr, provider)
+                        .getUserAccountData(addr)
+                        .call()
+                        .await
+                }
+            })
             .collect();
-
-        // Execute as multicall (alloy handles batching under the hood)
-        // Note: alloy's MulticallBuilder is used for true batching
-        // For simplicity here we use concurrent futures with join_all
-        let futures: Vec<_> = calls.into_iter().map(|c| c.call()).collect();
         let results = futures::future::join_all(futures).await;
 
         for (i, result) in results.into_iter().enumerate() {
