@@ -1,101 +1,145 @@
-# Playbook: Liquidation Bots
+# Playbook: Liquidation Bots (Aave v3 Arbitrum)
 
-**Status:** Research → Backtesting
+**Status:** Implementation complete — pending Hetzner deployment
 **Munger verdict:** APPROVED
 **Confidence:** 0.70
+**Architecture:** Rust executor (Layer 1) + TS Autoresearch (Layer 2)
 
 ---
 
 ## What
-Monitor lending protocol health factors (Aave v3 on Ethereum and L2s). When a position drops below
-the liquidation threshold (health factor < 1), execute the liquidation using a flash loan, seize
-the collateral discount (5–15%), repay the debt, pocket the spread.
+
+Monitor Aave v3 health factors on Arbitrum. When a position drops below the liquidation threshold (health factor < 1), execute the liquidation using a flash loan: seize the collateral at a 5–15% discount, repay the debt, pocket the spread — all in one atomic transaction.
 
 ## Why It Works
-The edge is **deterministic and calculable before execution**. Unlike MEV sandwich attacks where
-you race against professionals in microseconds, liquidations trigger at a known on-chain condition
-(health factor < 1). You know the exact profit before submitting the transaction. This is the
-"fat pitch" — you only swing when the math works.
+
+The edge is **deterministic and calculable before execution**. Unlike MEV sandwich attacks where you race professionals in microseconds, liquidations trigger at a known on-chain condition (health factor < 1). You know the exact profit before submitting. This is the "fat pitch" — swing only when the math works.
+
+Flash loans mean **zero principal at risk per trade**. If the tx reverts, only gas is lost. The only path to losing principal is a smart contract bug or Aave exploit.
+
+## Architecture (v2)
+
+```
+Rust Executor (always-on, no LLM)
+  event_listener.rs     — seeds borrower watchlist from Borrow events
+  health_scanner.rs     — batch-polls health factors via multicall
+  opportunity_ranker.rs — computes net profit, ranks opportunities
+  tx_submitter.rs       — pre-flight eth_call → sign → submit
+  missed_tracker.rs     — logs every liquidation we didn't win
+    ↓ SQLite (missed_opportunities table)
+TS Autoresearch (nightly 2am UTC)
+  collector.ts          — reads unanalyzed missed opps
+  anvil_simulator.ts    — forks Arbitrum, replays misses with param variants
+  parameter_compiler.ts — Claude analyzes → proposes new heuristic_params.json
+  shadow_evaluator.ts   — validates: ≥0.5% improvement required to apply
+```
 
 ## Entry Conditions
-1. Target position health factor drops below 1.0 (monitored via Aave's `getUserAccountData`)
-2. Liquidation bonus ≥ 5% (Aave default) on the seized collateral
-3. Estimated profit (bonus × collateral) MINUS gas cost > 0.005 ETH minimum
-4. No competing liquidation tx already in mempool for same position
 
-## Exit Conditions (single-block operation)
-- Flash loan repaid in same tx → no open position to exit
-- If tx reverts: log failure, update gas estimate, skip for 2 blocks
+1. Position health factor < 1.0 (via `AavePool.getUserAccountData`)
+2. Liquidation bonus ≥ 5% on seized collateral (Aave default)
+3. Estimated net profit (bonus × collateral − gas cost) > `min_profit_eth` (from heuristic_params.json)
+4. Pre-flight `eth_call` simulation succeeds
+5. Gas price ≤ `max_gas_gwei` (from heuristic_params.json)
 
-## Position Sizing
-- Flash loan covers 100% of debt repayment → zero capital at risk for the bet
-- Gas buffer: maintain 0.1 ETH minimum in trading wallet for gas
-- Max gas per liquidation attempt: 0.02 ETH (reject if estimated cost higher)
+## Exit Conditions
 
-## Gas Budget
-- Estimated gas per liquidation: 600k–1.2M gas
-- At 20 gwei: 0.012–0.024 ETH per attempt
-- Only attempt if bonus > gas × 3 (3× buffer for safety)
+Single-block atomic operation — flash loan repaid in same tx. No open position to manage.
+
+If tx reverts: log failure, circuit breaker counts toward limit.
+
+## heuristic_params.json (runtime parameters)
+
+Written by autoresearch, read by Rust executor. Hot-reloaded without restart.
+
+```json
+{
+  "max_gas_gwei": 1.0,
+  "min_profit_eth": 0.005,
+  "hf_alert_threshold": 1.08,
+  "scan_interval_ms": 15000,
+  "max_flash_loan_eth": 50.0,
+  "circuit_breaker_threshold": 5,
+  "circuit_breaker_cooldown_secs": 3600,
+  "version": 1,
+  "rationale": "Initial seed from historical Aave v3 Arbitrum data"
+}
+```
+
+Parameters improve automatically each night via the autoresearch loop. Small consistent improvements compound (Munger principle).
 
 ## Risk Controls
-- Never attempt on positions < $500 collateral (gas eats all profit)
-- Skip if mempool shows competing liquidation tx for same position
-- Skip if gas price > 50 gwei (wait for lower)
-- Circuit breaker: if 3 consecutive failed tx → pause 1 hour, alert Telegram
 
-## Target Protocols (by priority)
-1. **Aave v3 Ethereum mainnet** — largest TVL, most liquidations
-2. **Aave v3 Arbitrum** — lower gas, growing TVL, less competition
-3. **Aave v3 Optimism** — same as Arbitrum
-4. **Compound v3** — secondary target
+- **Pre-flight simulation**: `eth_call` before every tx — if it would revert, skip
+- **Profitability re-check**: re-query HF just before submission (conditions change fast)
+- **Gas cap**: skip if gas > `max_gas_gwei`
+- **Min size**: skip positions < $500 collateral (gas eats profit)
+- **Circuit breaker**: N consecutive failures → cooldown period, Telegram CRITICAL alert
+- **No principal risk**: flash loans are atomic — revert = only gas lost
 
-## Backtesting Requirements
-- Pull Aave liquidation events for last 90 days from The Graph
-- Calculate: profit per event, gas cost, net profit
-- Key metrics to validate: win rate, avg net profit/trade, max drawdown
-- Minimum bar to proceed: >70% win rate, avg net > 0.005 ETH after gas
+## Target Protocols (by deployment order)
+
+1. **Aave v3 Arbitrum** — lower gas, growing TVL, less competition ← live first
+2. **Radiant Capital (Arbitrum)** — same Rust pattern, different contract addresses ← Phase 3
+3. **Aave v3 Base + Optimism** — same contract addresses, different RPC ← Phase 3
+
+## Autoresearch — What It Learns
+
+Every missed liquidation is a training data point. For each miss:
+
+```
+Missed because gas too low?
+  → Raise max_gas_gwei toward winner's gas price
+
+Missed because we weren't watching?
+  → Lower hf_alert_threshold (detect earlier)
+
+Missed because scan too slow?
+  → Lower scan_interval_ms
+
+Win rate good, but missing small positions?
+  → Lower min_profit_eth threshold
+```
+
+The nightly Anvil fork simulations replay each miss with param variants to find what would have won. Claude compiles findings into a new params proposal. Shadow evaluation against 7-day history decides if it's applied.
+
+## Gas Budget
+
+```
+Estimated gas per liquidation: 600k–1.2M gas units
+At 1 gwei base fee (Arbitrum typical): ~0.0006–0.0012 ETH per attempt
+At 5 gwei: ~0.003–0.006 ETH per attempt
+```
+
+Only attempt if `estimated_profit > min_profit_eth`. The autoresearch loop tunes this threshold.
+
+## Deployment Gate (v2)
+
+- [x] Rust executor built + unit-tested
+- [x] TS autoresearch layer built
+- [x] LiquidationBot.sol written
+- [ ] 72h Anvil fork validation (no crashes, detects positions, correct math)
+- [ ] 72h shadow mode (competitive capture rate vs on-chain events)
+- [ ] Go live on Arbitrum
 
 ## Munger Evaluation
 
 ### Verdict: APPROVED
 
-### Inversion Analysis
+### Inversion
 *What guarantees this fails?*
-- Gas spike during high volatility eats all profit → gas limit enforced
-- Protocol exploit drains Aave → diversify across protocols, monitor TVS
-- Faster bots outcompete on every event → focus on smaller positions (<$10k) where big bots don't bother
-- Smart contract bug in our liquidation contract → audit before mainnet
+- Gas spikes during high volatility eat all profit → gas cap enforced; autoresearch tunes it
+- Faster bots outcompete us on every event → focus on smaller positions (<$10k) where large bots ignore
+- Smart contract bug in LiquidationBot.sol → pre-flight eth_call + contract audit before mainnet
+- Aave protocol exploit → risk is real but historically has never happened at protocol level; diversify later
 
 ### Circle of Competence
-We understand this well enough. Aave liquidation mechanics are fully documented. The math is
-simple and verifiable. Health factor is a deterministic on-chain variable — no prediction needed.
-This is adjacent to our competence and can be expanded carefully.
+Aave liquidation mechanics are fully documented and well-understood. Health factor is a deterministic on-chain variable — no prediction needed. Math is simple and verifiable.
 
 ### Margin of Safety
-Flash loan design means we put zero principal at risk per trade. We only pay gas if we attempt.
-The only way to lose principal is through a smart contract bug or Aave exploit. Both are
-mitigated by using audited protocols and keeping trading wallet at minimum floor.
+Flash loan design = zero principal at risk per trade. Trading wallet floor = 0.5 ETH minimum always maintained. Circuit breaker = automatic cooldown after consecutive failures.
 
 ### Key Risks (ranked)
-1. Competition density — professional liquidation bots exist and are fast
-2. Gas spikes during exact moments we need to liquidate (high volatility = expensive blocks)
-3. Aave smart contract exploit (historically never happened at protocol level)
-
-### Recommendation
-Start on Arbitrum (lower gas, growing TVL, less competition than mainnet). Build and backtest
-for 2 weeks. Deploy to testnet. Only go mainnet after 30+ successful simulated liquidations.
-
----
-
-## Implementation Notes
-- Use `viem` to call `getUserAccountData(address)` across a watchlist of positions
-- Build position watchlist by monitoring Aave `Borrow` events (new borrowers)
-- Flash loan provider: Aave itself (`flashLoan` on the Pool contract)
-- Liquidation call: `liquidationCall(collateralAsset, debtAsset, user, debtToCover, receiveAToken)`
-- Keep a local SQLite cache of monitored positions (avoid re-fetching all borrow events each block)
-
-## Phase Gate to Testnet
-- [ ] Backtest shows >70% win rate over 90 days of Aave data
-- [ ] Positive expected value after gas (avg net > 0.005 ETH)
-- [ ] Smart contract written and audited (even lightweight internal review)
-- [ ] Munger re-approves after seeing backtest numbers
+1. Competition density — professional bots exist and are fast (mitigated by smaller positions)
+2. Gas spikes during volatility spikes (exact moment we need to liquidate)
+3. Aave smart contract exploit (historically never happened)

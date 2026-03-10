@@ -60,6 +60,12 @@ keystore.json
 pm2-logs/
 *.tsbuildinfo
 
+# Heuristic params — written at runtime by autoresearch, not committed
+heuristic_params.json
+
+# Rust build artifacts
+/target/
+
 # Hardhat
 artifacts/
 cache/

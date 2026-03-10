@@ -1,93 +1,117 @@
+/**
+ * ETHTrainer — TypeScript entrypoint.
+ *
+ * This process manages Layer 2 (autoresearch) and Layer 3 (monitor).
+ * Layer 1 (Rust executor) runs as a separate pm2 process.
+ *
+ * What this does:
+ *   1. Initialize the database (create tables if needed)
+ *   2. Start the monitor (process watchdog + daily P&L reporting)
+ *   3. Schedule the nightly autoresearch loop (2am UTC)
+ *   4. Handle graceful shutdown
+ *
+ * The Rust liquidator process is started separately:
+ *   pm2 start ./target/release/liquidator --name liquidator -- --live
+ */
+
 import 'dotenv/config'
-import { config } from './config.js'
 import { getDb, closeDb } from './db/index.js'
-import { loadTradingWallet } from './wallet/keystore.js'
-import { checkNodeConnection, getEthBalance } from './ethereum/client.js'
-import { getTradingAccount } from './wallet/keystore.js'
 import { alertStartup, alertError } from './telegram/bot.js'
-import { MasterAgent } from './agents/master.js'
-import { logAgent } from './db/queries.js'
+import { startMonitor } from './monitor/index.js'
+import { runAutoresearchCycle } from './autoresearch/loop.js'
+import { config } from './config.js'
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 async function startup(): Promise<void> {
-  console.log('🚀 ETHTrainer starting...')
-  console.log(`   Network: ${config.NETWORK}`)
+  console.log('ETHTrainer TS layer starting...')
 
-  // Initialize database
+  // Initialize database (creates tables if first run)
   getDb()
-  console.log('✅ Database initialized')
+  console.log('Database initialized')
 
-  // Load and decrypt trading wallet
-  await loadTradingWallet(
-    config.KEYSTORE_PATH,
-    config.KEYCHAIN_SERVICE,
-    config.KEYCHAIN_ACCOUNT,
-  )
-  console.log('✅ Trading wallet loaded')
-
-  // Check Ethereum node connection
-  const nodeStatus = await checkNodeConnection()
-  if (!nodeStatus.connected) {
-    throw new Error(`Cannot connect to Ethereum node at ${config.ETH_RPC_URL}: ${nodeStatus.error}`)
-  }
-  console.log(`✅ Ethereum node connected (block ${nodeStatus.blockNumber})`)
-
-  // Get initial balance
-  const account = getTradingAccount()
-  const { eth } = await getEthBalance(account.address)
-  console.log(`✅ Trading wallet: ${account.address}`)
-  console.log(`   Balance: ${eth} ETH`)
-
-  await alertStartup(config.NETWORK, account.address, eth)
-
-  logAgent('master', 'info', 'ETHTrainer started', {
-    network: config.NETWORK,
-    address: account.address,
-    balanceEth: eth,
-  })
+  await alertStartup(config.NETWORK, '(TS monitor + autoresearch)', '0')
+  console.log('Telegram alert sent')
 }
 
-// ── Main loop ─────────────────────────────────────────────────────────────────
+// ── Autoresearch scheduler ────────────────────────────────────────────────────
 
-const CYCLE_INTERVAL_MS = 60 * 60 * 1000  // Run every hour
+function scheduleAutoresearch(): void {
+  const runAt2amUTC = () => {
+    const now = new Date()
+    const msUntil2am = (() => {
+      const next2am = new Date(now)
+      next2am.setUTCHours(2, 0, 0, 0)
+      if (next2am <= now) next2am.setUTCDate(next2am.getUTCDate() + 1)
+      return next2am.getTime() - now.getTime()
+    })()
+
+    console.log(`Autoresearch next run in ${(msUntil2amUTC / 3600000).toFixed(1)}h`)
+
+    setTimeout(async () => {
+      try {
+        await runAutoresearchCycle()
+      } catch (err) {
+        const msg = `Autoresearch failed: ${err instanceof Error ? err.message : String(err)}`
+        console.error(msg)
+        await alertError(msg)
+      }
+      // Schedule next run (24h later)
+      runAt2amUTC()
+    }, msUntil2am)
+  }
+
+  const msUntil2amUTC = (() => {
+    const now = new Date()
+    const next2am = new Date(now)
+    next2am.setUTCHours(2, 0, 0, 0)
+    if (next2am <= now) next2am.setUTCDate(next2am.getUTCDate() + 1)
+    return next2am.getTime() - now.getTime()
+  })()
+
+  console.log(`Autoresearch scheduled for 2am UTC (in ${(msUntil2amUTC / 3600000).toFixed(1)}h)`)
+
+  setTimeout(async () => {
+    try {
+      await runAutoresearchCycle()
+    } catch (err) {
+      const msg = `Autoresearch failed: ${err instanceof Error ? err.message : String(err)}`
+      console.error(msg)
+      await alertError(msg)
+    }
+    // Schedule next run
+    runAt2amUTC()
+  }, msUntil2amUTC)
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   await startup()
 
-  const master = new MasterAgent(config.OBSIDIAN_VAULT_PATH)
+  // Start monitor (process watchdog + daily P&L)
+  await startMonitor()
 
-  console.log('✅ MasterAgent initialized — starting first cycle')
+  // Schedule nightly autoresearch at 2am UTC
+  scheduleAutoresearch()
 
-  // Run immediately, then on interval
-  const runCycleSafe = async () => {
-    try {
-      await master.runCycle()
-    } catch (err) {
-      const msg = `Cycle error: ${String(err)}`
-      console.error(msg)
-      logAgent('master', 'error', msg)
-      await alertError(msg)
-    }
-  }
-
-  await runCycleSafe()
-  const interval = setInterval(runCycleSafe, CYCLE_INTERVAL_MS)
+  console.log('ETHTrainer TS layer running. Rust liquidator managed by pm2.')
+  console.log('Ctrl+C to stop this process (does NOT stop the Rust bot).')
 
   // Graceful shutdown
   const shutdown = () => {
-    console.log('\n👋 ETHTrainer shutting down...')
-    clearInterval(interval)
-    master.stop()   // stops liquidation bot interval, event monitor, etc.
+    console.log('\nETHTrainer TS layer shutting down...')
     closeDb()
     process.exit(0)
   }
 
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+
+  // Keep process alive (monitor uses setInterval internally)
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Fatal error:', err)
   process.exit(1)
 })

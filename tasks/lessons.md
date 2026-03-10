@@ -75,3 +75,28 @@ Purpose: prevent the same mistake from happening twice.
   - Use `forceApprove` (SafeERC20) not `approve` — handles non-standard tokens like USDT
   - No deadline in Uniswap SwapRouter02 (it was removed; use SwapRouter02 not SwapRouter)
   - Profit accumulates in contract; owner calls `withdraw()` separately
+
+### v2 architecture — no flash loan cap
+**What happened:** N/A — captured from planning phase.
+**Root cause:** N/A.
+**Rule:** Do NOT add a flash loan size cap. Flash loans are atomic — if the tx reverts, only gas is lost, never principal. A cap limits upside with zero reduction in downside risk. Real protection comes from: pre-flight eth_call + profitability check in the contract + circuit breaker.
+
+### v2 architecture — autoresearch improvement threshold is 0.5%, not 5%
+**What happened:** N/A — deliberate design choice.
+**Root cause:** Charlie Munger compounding principle.
+**Rule:** The shadow_evaluator.ts `MIN_IMPROVEMENT_PCT` is 0.5%. Small consistent edges compound aggressively. Do not raise this threshold without strong evidence it's generating false positives.
+
+### v2 architecture — Rust for hot path, TS only for autoresearch brain
+**What happened:** v1 used TypeScript for everything including the execution layer.
+**Root cause:** TS adds latency and LLM calls have no place in a liquidation hot path.
+**Rule:** Layer 1 (Rust executor) is LLM-free. It reads heuristic_params.json and acts deterministically. Layer 2 (TS autoresearch) runs nightly and is the only layer that calls Claude. Never add LLM calls to the Rust executor.
+
+### macOS Keychain does not exist on Linux (Hetzner)
+**What happened:** Original CLAUDE.md described storing the keystore password in macOS Keychain.
+**Root cause:** Development was on Mac Mini; Hetzner server runs Ubuntu.
+**Rule:** On Hetzner (Linux), use `.dev.vars` with `chmod 600` for the `KEYSTORE_PASSWORD` env var. No macOS Keychain. The keystore file lives at `~/.ethtrainer/keystore.json` (outside the repo).
+
+### HeuristicParams cast to Record<string,unknown> needs double-cast
+**What happened:** TypeScript error: `Conversion of type 'HeuristicParams' to type 'Record<string, unknown>' may be a mistake`.
+**Root cause:** TS won't directly cast a typed interface to an index signature type.
+**Rule:** Use `as unknown as Record<string, unknown>` (double cast) when you need to iterate over a typed interface's keys. This is intentional and correct — don't suppress with `@ts-ignore`.

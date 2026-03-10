@@ -5,24 +5,75 @@
 
 module.exports = {
   apps: [
+    // ── Layer 1: Rust Liquidation Executors (one per chain) ─────────────────
+    // The hot path — always-on, no LLM, reads heuristic_params.<chain>.json
+    // Start in shadow mode first (72h validation), then switch to --live
     {
-      name: 'ethtrainer',
+      name: 'liquidator-arbitrum',
+      script: './target/release/liquidator',
+      args: '--chain arbitrum --live',
+      interpreter: 'none',
+      env: { RUST_LOG: 'liquidator=info' },
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 3000,
+      min_uptime: '10s',
+      out_file: './pm2-logs/liquidator-arbitrum-out.log',
+      error_file: './pm2-logs/liquidator-arbitrum-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs: true,
+    },
+    {
+      name: 'liquidator-base',
+      script: './target/release/liquidator',
+      args: '--chain base --live',
+      interpreter: 'none',
+      env: { RUST_LOG: 'liquidator=info' },
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 3000,
+      min_uptime: '10s',
+      out_file: './pm2-logs/liquidator-base-out.log',
+      error_file: './pm2-logs/liquidator-base-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs: true,
+    },
+    {
+      name: 'liquidator-optimism',
+      script: './target/release/liquidator',
+      args: '--chain optimism --live',
+      interpreter: 'none',
+      env: { RUST_LOG: 'liquidator=info' },
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 3000,
+      min_uptime: '10s',
+      out_file: './pm2-logs/liquidator-optimism-out.log',
+      error_file: './pm2-logs/liquidator-optimism-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs: true,
+    },
+
+    // ── Layer 2+3: TypeScript Monitor + Autoresearch ────────────────────────
+    // Lightweight — watchdog, daily P&L, nightly autoresearch loop
+    {
+      name: 'ethtrainer-ts',
       script: 'npx',
       args: 'tsx src/index.ts',
       interpreter: 'none',
       env: {
         NODE_ENV: 'production',
       },
-      // Restart policy
       autorestart: true,
       watch: false,
       max_restarts: 10,
       restart_delay: 5000,
       min_uptime: '10s',
-
-      // Logging
-      out_file: './pm2-logs/out.log',
-      error_file: './pm2-logs/error.log',
+      out_file: './pm2-logs/ts-out.log',
+      error_file: './pm2-logs/ts-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
       merge_logs: true,
     },
