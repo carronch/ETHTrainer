@@ -8,12 +8,14 @@
  *   tsx scripts/seed-params.ts
  */
 
-import 'dotenv/config'
+import { config as loadDotenv } from 'dotenv'
+loadDotenv({ path: '.dev.vars' })
 import { writeFileSync } from 'node:fs'
 import Anthropic from '@anthropic-ai/sdk'
 
+const CHAIN = process.env['NETWORK'] ?? 'arbitrum'
 const THEGRAPH_URL = 'https://api.thegraph.com/subgraphs/name/aave/protocol-v3-arbitrum'
-const PARAMS_FILE = 'heuristic_params.json'
+const PARAMS_FILE = `heuristic_params.${CHAIN}.json`
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
