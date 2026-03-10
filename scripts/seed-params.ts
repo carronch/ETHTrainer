@@ -229,8 +229,12 @@ async function main(): Promise<void> {
   const analysis = analyzeHistory(events)
   console.log('\nAnalysis:', analysis)
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('\nANTHROPIC_API_KEY not set — writing conservative defaults instead')
+  if (!process.env.ANTHROPIC_API_KEY || analysis.total_liquidations === 0) {
+    if (analysis.total_liquidations === 0) {
+      console.log('\nNo historical data — writing conservative defaults')
+    } else {
+      console.error('\nANTHROPIC_API_KEY not set — writing conservative defaults instead')
+    }
     const defaults = {
       max_gas_gwei: 1.0,
       min_profit_eth: 0.005,
