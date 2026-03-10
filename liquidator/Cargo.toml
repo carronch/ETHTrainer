@@ -12,6 +12,7 @@ path = "src/main.rs"
 alloy = { version = "1", features = [
     "full",
     "signer-local",
+    "signer-local-keystore",
     "provider-http",
     "provider-ws",
     "contract",

@@ -137,7 +137,6 @@ async fn main() -> Result<()> {
 
     // HTTP provider for reads + tx submission
     let provider = alloy::providers::ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(alloy::network::EthereumWallet::from(signer))
         .connect_http(rpc_url.parse()?);
     let provider = Arc::new(provider);

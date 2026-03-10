@@ -61,7 +61,7 @@ impl EventListener {
 
             let filter = Filter::new()
                 .address(self.pool)
-                .event_signature(Borrow::SELECTOR)
+                .event_signature(Borrow::SIGNATURE_HASH)
                 .from_block(BlockNumberOrTag::Number(from))
                 .to_block(BlockNumberOrTag::Number(to));
 
@@ -101,11 +101,12 @@ impl EventListener {
 
             let filter = Filter::new()
                 .address(pool)
-                .event_signature(Borrow::SELECTOR);
+                .event_signature(Borrow::SIGNATURE_HASH);
 
             match provider.subscribe_logs(&filter).await {
-                Ok(mut stream) => {
+                Ok(stream) => {
                     use futures::StreamExt;
+                    tokio::pin!(stream);
                     while let Some(log) = stream.next().await {
                         let log: alloy::rpc::types::Log = log;
                         if let Ok(decoded) = log.log_decode::<Borrow>() {
