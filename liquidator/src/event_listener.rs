@@ -105,17 +105,23 @@ impl EventListener {
 
             match provider.subscribe_logs(&filter).await {
                 Ok(mut stream) => {
-                    while let Some(log) = stream.next().await {
-                        let log: alloy::rpc::types::Log = log;
-                        if let Ok(decoded) = log.log_decode::<Borrow>() {
-                            let borrower = decoded.data().onBehalfOf;
-                            let block = log.block_number.unwrap_or(0);
-                            if let Ok(db_lock) = db.lock() {
-                                let _ = db_lock.upsert_borrower(&borrower.to_string(), block);
+                    loop {
+                        match stream.recv().await {
+                            Ok(log) => {
+                                if let Ok(decoded) = log.log_decode::<Borrow>() {
+                                    let borrower = decoded.data().onBehalfOf;
+                                    let block = log.block_number.unwrap_or(0);
+                                    if let Ok(db_lock) = db.lock() {
+                                        let _ = db_lock.upsert_borrower(&borrower.to_string(), block);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Borrow event stream ended: {e}");
+                                break;
                             }
                         }
                     }
-                    warn!("Borrow event stream ended unexpectedly");
                 }
                 Err(e) => {
                     warn!("Failed to subscribe to Borrow events: {e}");

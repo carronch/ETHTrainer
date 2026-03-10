@@ -61,62 +61,63 @@ impl MissedTracker {
 
             match provider.subscribe_logs(&filter).await {
                 Ok(mut stream) => {
-                    while let Some(log) = stream.next().await {
-                        let log: alloy::rpc::types::Log = log;
-                        if let Ok(decoded) = log.log_decode::<LiquidationCall>() {
-                            let event = decoded.data();
-                            let borrower = event.user;
+                    loop {
+                        match stream.recv().await {
+                            Ok(log) => {
+                                if let Ok(decoded) = log.log_decode::<LiquidationCall>() {
+                                    let event = decoded.data();
+                                    let borrower = event.user;
 
-                            // Check if borrower was on our watchlist
-                            let is_watched = {
-                                if let Ok(db_lock) = db.lock() {
-                                    db_lock
-                                        .get_active_watchlist()
-                                        .map(|list| list.contains(&borrower))
-                                        .unwrap_or(false)
-                                } else {
-                                    false
-                                }
-                            };
+                                    // Check if borrower was on our watchlist
+                                    let is_watched = {
+                                        if let Ok(db_lock) = db.lock() {
+                                            db_lock
+                                                .get_active_watchlist()
+                                                .map(|list| list.contains(&borrower))
+                                                .unwrap_or(false)
+                                        } else {
+                                            false
+                                        }
+                                    };
 
-                            if is_watched {
-                                // Fetch the tx to get the winner's gas price
-                                let winner_gas_gwei = log
-                                    .transaction_hash
-                                    .and_then(|h| {
-                                        // We log 0.0 if we can't fetch — autoresearch
-                                        // can query on-chain separately for this block
-                                        None::<f64>
-                                    })
-                                    .unwrap_or(0.0);
+                                    if is_watched {
+                                        let winner_gas_gwei = log
+                                            .transaction_hash
+                                            .and_then(|_h| None::<f64>)
+                                            .unwrap_or(0.0);
 
-                                let missed = MissedOpportunity {
-                                    borrower,
-                                    collateral_asset: event.collateralAsset,
-                                    debt_asset: event.debtAsset,
-                                    profit_missed_eth: 0.0, // autoresearch computes this
-                                    winner_address: event.liquidator,
-                                    winner_gas_gwei,
-                                    block_number: log.block_number.unwrap_or(0),
-                                    timestamp: Utc::now().timestamp(),
-                                };
+                                        let missed = MissedOpportunity {
+                                            borrower,
+                                            collateral_asset: event.collateralAsset,
+                                            debt_asset: event.debtAsset,
+                                            profit_missed_eth: 0.0,
+                                            winner_address: event.liquidator,
+                                            winner_gas_gwei,
+                                            block_number: log.block_number.unwrap_or(0),
+                                            timestamp: Utc::now().timestamp(),
+                                        };
 
-                                if let Ok(db_lock) = db.lock() {
-                                    if let Err(e) = db_lock.insert_missed_opportunity(&missed) {
-                                        warn!("Failed to log missed opportunity: {e}");
-                                    } else {
-                                        info!(
-                                            borrower = ?borrower,
-                                            winner = ?event.liquidator,
-                                            block = log.block_number,
-                                            "Missed liquidation logged"
-                                        );
+                                        if let Ok(db_lock) = db.lock() {
+                                            if let Err(e) = db_lock.insert_missed_opportunity(&missed) {
+                                                warn!("Failed to log missed opportunity: {e}");
+                                            } else {
+                                                info!(
+                                                    borrower = ?borrower,
+                                                    winner = ?event.liquidator,
+                                                    block = log.block_number,
+                                                    "Missed liquidation logged"
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            Err(e) => {
+                                warn!("LiquidationCall stream ended: {e}");
+                                break;
+                            }
                         }
                     }
-                    warn!("LiquidationCall event stream ended — this should not happen");
                 }
                 Err(e) => {
                     warn!("Failed to subscribe to LiquidationCall events: {e}");
