@@ -104,9 +104,7 @@ impl EventListener {
                 .event_signature(Borrow::SIGNATURE_HASH);
 
             match provider.subscribe_logs(&filter).await {
-                Ok(stream) => {
-                    use futures::StreamExt;
-                    tokio::pin!(stream);
+                Ok(mut stream) => {
                     while let Some(log) = stream.next().await {
                         let log: alloy::rpc::types::Log = log;
                         if let Ok(decoded) = log.log_decode::<Borrow>() {
