@@ -69,8 +69,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load .dev.vars environment
-    let _ = dotenv();
+    // Load .dev.vars environment (fall back to .env if not found)
+    let _ = dotenvy::from_filename(".dev.vars").or_else(|_| dotenv());
 
     // Structured logging
     tracing_subscriber::registry()
