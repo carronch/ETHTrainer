@@ -75,19 +75,33 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 - [x] Setup wallet keystore (`~/.ethtrainer/keystore.json`)
 - [x] Liquidator running in shadow mode via **systemd** (auto-restart, survives SSH disconnect + reboot)
 
-### Remaining Steps
-- [x] Fund trading wallet — 0.1 ETH sent to Arbitrum (sufficient for Arbitrum gas; 0.5 ETH floor is sweep rule only, not operational minimum)
-- [x] **72h Shadow mode** — started, running via systemd on Hetzner
-- [x] Security audit complete — two bugs fixed in `LiquidationBot.sol` (allowance mismatch + underflow panic)
-- [ ] **Compile contract**: `npm run compile` — must be clean after bug fixes
-- [ ] **Deploy** `LiquidationBot.sol` to Arbitrum: `npm run deploy:liquidation`
-- [ ] Set `LIQUIDATION_BOT_ADDRESS` in `.dev.vars` on Hetzner → `systemctl restart liquidator`
-- [ ] Seed heuristic params: `npx tsx scripts/seed-params.ts`
-- [ ] Monitor shadow logs: `journalctl -u liquidator -f` — look for "SHADOW Would have earned" lines
-- [ ] Go live: remove `--shadow` from systemd unit, `systemctl restart liquidator`
+### Completed
+- [x] Fund trading wallet — 0.1 ETH sent to Arbitrum
+- [x] Security audit — two bugs fixed in `LiquidationBot.sol` (allowance mismatch + underflow panic)
+- [x] Contract compiled + deployed to Arbitrum: `0xdd735eDAD018357825c164a5A81aFAeeC2f1Fd0D`
+- [x] `LIQUIDATION_BOT_ADDRESS` written to `.dev.vars`, liquidator restarted
+- [x] Heuristic params seeded (`heuristic_params.arbitrum.json` — conservative defaults, The Graph endpoint dead)
+- [x] Bug fix: Aave oracle address in `chains.rs` was 39 hex chars (missing final `7`) → fixed to `0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C7`
+- [x] Bug fix: `db.rs` `open()` never created SQLite schema → added `CREATE TABLE IF NOT EXISTS` on open
+- [x] TS monitor started via pm2 (`ethtrainer-ts` — health watchdog + autoresearch scheduler)
+- [x] Telegram alerts working
+- [x] **72h Shadow mode running** — started 2026-03-11 ~19:41 UTC, `watchlist_size=1` at cycle 50
 
-> Anvil fork validation (original Phase 1 plan) skipped — shadow mode on real Arbitrum RPC provides equivalent signal.
-> Telegram alerts during shadow: daily P&L at 9am UTC + critical alerts. No-win-in-48h alert will fire (expected in shadow — ignore it).
+### In Progress
+- [ ] **Monitor shadow logs** — check `journalctl -u liquidator -n 30 --no-pager` periodically
+  - Look for: `Scan cycle complete watchlist_size=N` (N growing) and `[SHADOW] Would have earned X ETH`
+  - If `watchlist_size=0` after 24h, investigate WS subscription
+- [ ] **Go live after 72h** (after 2026-03-14 ~19:41 UTC):
+  ```bash
+  systemctl edit liquidator --force   # change --shadow → --live
+  systemctl daemon-reload && systemctl restart liquidator
+  ```
+
+### Known Limitations (non-blocking)
+- Alchemy free tier: historical Borrow seed fails (10-block max range). Watchlist builds via WS only. Upgrade to PAYG when profitable.
+- The Graph hosted endpoint dead: seed-params uses conservative defaults only.
+
+> Anvil fork validation skipped — shadow mode on real Arbitrum RPC provides equivalent signal.
 
 ---
 
@@ -101,9 +115,9 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 
 ## 🔵 Phase 3 — Scale (after first profitable month)
 
-- [ ] Add Radiant Capital (Arbitrum largest lender, Aave v2 fork, same Rust pattern)
+- [ ] Add Radiant Capital (Parked — recent $50M exploit, TVL too low)
 - [ ] Add The Graph complete borrower coverage (all current borrowers, not just recent events)
-- [ ] Aave v3 Base + Optimism (same contract addresses, different RPC)
+- [/] Aave v3 Base + Optimism (Base integration in progress)
 
 ---
 

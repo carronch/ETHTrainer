@@ -42,22 +42,31 @@ impl EventListener {
         Ok(Self { pool: pool_address.parse()?, history_blocks })
     }
 
-    /// Seed the watchlist from historical Borrow events (last 3 days).
+    /// Seed the watchlist from historical Borrow events.
     pub async fn seed_from_history<P: Provider>(
         &self,
         provider: &P,
         db: &Db,
     ) -> Result<usize> {
         let current_block = provider.get_block_number().await?;
-        let from_block = current_block.saturating_sub(self.history_blocks);
+        
+        let db_size = db.watchlist_size().unwrap_or(0);
+        let blocks_to_fetch = if db_size < 1000 {
+            self.history_blocks * 60 // Go back approx 6 months (60 * 3 days) if db is basically empty
+        } else {
+            self.history_blocks
+        };
 
-        info!(from_block, to_block = current_block, "Seeding watchlist from Borrow history");
+        let from_block = current_block.saturating_sub(blocks_to_fetch);
+
+        info!(from_block, to_block = current_block, target_lookback_blocks = blocks_to_fetch, "Seeding watchlist from Borrow history");
 
         let mut count = 0usize;
         let mut from = from_block;
+        let mut current_chunk_size = CHUNK_SIZE;
 
         while from < current_block {
-            let to = (from + CHUNK_SIZE - 1).min(current_block);
+            let to = (from + current_chunk_size - 1).min(current_block);
 
             let filter = Filter::new()
                 .address(self.pool)
@@ -75,13 +84,29 @@ impl EventListener {
                             count += 1;
                         }
                     }
+                    from = to + 1;
+                    
+                    // Optional: slowly recover chunk size if it dropped
+                    if current_chunk_size < CHUNK_SIZE {
+                        current_chunk_size = (current_chunk_size * 2).min(CHUNK_SIZE);
+                    }
                 }
                 Err(e) => {
-                    warn!(from, to, "Chunk failed: {e}");
+                    let err_str = e.to_string();
+                    warn!(from, to, chunk_size = current_chunk_size, "Chunk failed: {err_str}");
+                    
+                    // If we hit a block range limit or size limit, reduce chunk size
+                    if current_chunk_size > 10 {
+                        current_chunk_size /= 10;
+                        current_chunk_size = current_chunk_size.max(10);
+                        warn!(new_size = current_chunk_size, "Reducing chunk size and retrying");
+                    } else {
+                        // If we are already at minimum size and still failing, we must skip
+                        warn!("Minimum chunk size failed. Skipping range to avoid infinite loop.");
+                        from = to + 1;
+                    }
                 }
             }
-
-            from = to + 1;
         }
 
         info!(count, "Watchlist seeded from history");

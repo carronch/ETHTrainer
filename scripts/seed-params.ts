@@ -14,7 +14,7 @@ import { writeFileSync } from 'node:fs'
 import Anthropic from '@anthropic-ai/sdk'
 
 const CHAIN = process.env['NETWORK'] ?? 'arbitrum'
-const THEGRAPH_URL = 'https://api.thegraph.com/subgraphs/name/aave/protocol-v3-arbitrum'
+const THEGRAPH_URL = 'https://api.studio.thegraph.com/query/75401/aave-v3-arbitrum-project/version/latest'
 const PARAMS_FILE = `heuristic_params.${CHAIN}.json`
 
 // ── Data fetching ─────────────────────────────────────────────────────────────

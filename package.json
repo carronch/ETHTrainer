@@ -14,6 +14,7 @@
     "autoresearch": "tsx scripts/run-autoresearch.ts",
     "compile": "hardhat compile",
     "deploy:liquidation": "tsx scripts/deploy-liquidation-bot.ts",
+    "deploy:base": "tsx scripts/deploy-liquidation-bot-base.ts",
     "build:rust": "cargo build --release -p liquidator"
   },
   "dependencies": {
