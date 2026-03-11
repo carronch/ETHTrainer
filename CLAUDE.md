@@ -208,10 +208,14 @@ cargo build --release -p liquidator
 npx tsx scripts/seed-params.ts        # one-time: seed heuristic_params.json
 npx tsx scripts/run-autoresearch.ts   # manual autoresearch cycle trigger
 
-# pm2 (production)
-pm2 start ecosystem.config.cjs        # starts liquidator + ethtrainer-ts
+# systemd (production — Rust liquidator)
+systemctl status liquidator           # check status
+journalctl -u liquidator -f           # live logs
+systemctl restart liquidator          # restart
+
+# pm2 (production — TS monitor + autoresearch)
+pm2 start ecosystem.config.cjs        # starts ethtrainer-ts
 pm2 save && pm2 startup               # persist across reboots
-pm2 logs liquidator                   # Rust bot logs
 pm2 logs ethtrainer-ts                # TS monitor + autoresearch logs
 ```
 
@@ -262,7 +266,7 @@ Detailed metrics → Grafana via Tailscale (not Telegram).
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Architecture rebuild (3-layer, Rust + TS) | ✅ Complete |
-| 1 | Hetzner activation + 72h Anvil + 72h shadow + go live | Next |
+| 1 | Hetzner activation + 72h Anvil + 72h shadow + go live | 🟡 In Progress — server running, shadow mode via systemd, contract not yet deployed |
 | 2 | Autoresearch online (first nightly cycle) | After Phase 1 |
 | 3 | Scale: Radiant Capital + The Graph complete coverage + multi-chain | After profitable month |
 

@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,97 +115,13 @@ async function chatClaude(
   return { content: finalText, model, inputTokens: totalInput, outputTokens: totalOutput }
 }
 
-// ── OpenAI client ─────────────────────────────────────────────────────────────
-
-let _openai: OpenAI | null = null
-
-function getOpenAI(): OpenAI {
-  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  return _openai
-}
-
-async function chatOpenAI(
-  systemPrompt: string,
-  messages: Message[],
-  tools: Tool[],
-  opts: ChatOptions,
-): Promise<ChatResult> {
-  const client = getOpenAI()
-  const model = opts.model ?? 'gpt-4o'
-
-  const openAITools: OpenAI.Chat.ChatCompletionTool[] = tools.map(t => ({
-    type: 'function' as const,
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.inputSchema,
-    },
-  }))
-
-  const history: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt },
-    ...messages.map(m => ({ role: m.role, content: m.content } as OpenAI.Chat.ChatCompletionMessageParam)),
-  ]
-
-  let finalText = ''
-  let totalInput = 0
-  let totalOutput = 0
-
-  while (true) {
-    const response = await client.chat.completions.create({
-      model,
-      max_tokens: opts.maxTokens ?? 4096,
-      messages: history,
-      tools: openAITools.length > 0 ? openAITools : undefined,
-    })
-
-    const choice = response.choices[0]
-    totalInput += response.usage?.prompt_tokens ?? 0
-    totalOutput += response.usage?.completion_tokens ?? 0
-
-    if (choice.message.content) {
-      finalText = choice.message.content
-    }
-
-    if (choice.finish_reason === 'stop' || !choice.message.tool_calls?.length) {
-      break
-    }
-
-    history.push(choice.message)
-
-    for (const call of choice.message.tool_calls) {
-      const tool = tools.find(t => t.name === call.function.name)
-      let result: unknown
-      if (!tool) {
-        result = { error: `Unknown tool: ${call.function.name}` }
-      } else {
-        try {
-          const input = JSON.parse(call.function.arguments) as Record<string, unknown>
-          result = await tool.execute(input)
-        } catch (err) {
-          result = { error: String(err) }
-        }
-      }
-      history.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
-    }
-  }
-
-  return { content: finalText, model, inputTokens: totalInput, outputTokens: totalOutput }
-}
-
 // ── Unified chat function ─────────────────────────────────────────────────────
-
-export type LLMProvider = 'claude' | 'openai'
 
 export async function chat(
   systemPrompt: string,
   messages: Message[],
   tools: Tool[] = [],
-  opts: ChatOptions & { provider?: LLMProvider } = {},
+  opts: ChatOptions = {},
 ): Promise<ChatResult> {
-  const provider = opts.provider ?? 'claude'
-  if (provider === 'openai') {
-    return chatOpenAI(systemPrompt, messages, tools, opts)
-  }
   return chatClaude(systemPrompt, messages, tools, opts)
 }

@@ -81,26 +81,21 @@ async function runHealthCheck(): Promise<void> {
 
 async function checkRustProcess(): Promise<void> {
   try {
-    const { stdout } = await execAsync('pm2 jlist')
-    const processes = JSON.parse(stdout) as { name: string; pm2_env: { status: string } }[]
-    const liquidator = processes.find((p) => p.name === 'liquidator')
+    // Rust liquidator runs via systemd on Hetzner (not pm2)
+    const { stdout } = await execAsync('systemctl is-active liquidator')
+    const status = stdout.trim()
 
-    if (!liquidator) {
-      await alertError('Rust liquidator process NOT FOUND in pm2. Manual intervention required.')
-      return
-    }
-
-    if (liquidator.pm2_env.status !== 'online') {
-      await alertError(`Rust liquidator process status: ${liquidator.pm2_env.status}. Attempting restart.`)
+    if (status !== 'active') {
+      await alertError(`Rust liquidator systemd service is ${status}. Attempting restart.`)
       try {
-        await execAsync('pm2 restart liquidator')
-        await alertInfo('Liquidator process restarted via pm2')
+        await execAsync('systemctl restart liquidator')
+        await alertInfo('Liquidator service restarted via systemctl')
       } catch (restartErr) {
         await alertError(`Failed to restart liquidator: ${restartErr}`)
       }
     }
   } catch {
-    // pm2 not available (dev environment) — skip silently
+    // systemctl not available (dev environment) — skip silently
   }
 }
 

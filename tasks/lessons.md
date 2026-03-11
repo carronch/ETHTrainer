@@ -70,11 +70,12 @@ Purpose: prevent the same mistake from happening twice.
 **Root cause:** N/A.
 **Rule:** When modifying LiquidationBot.sol:
   - `flashLoanSimple` (not `flashLoan`) — only one asset at a time, cleaner
-  - `type(uint256).max` as debtToCover — let Aave determine close factor
+  - Pass `amount` (the flash loan size) as `debtToCover` in `liquidationCall` — NEVER `type(uint256).max`. Using max causes `ERC20: insufficient allowance` because Aave tries to pull up to the close factor which can exceed the flash loan amount. The Rust executor calculates the correct amount before calling the contract.
   - `executeOperation` must verify `msg.sender == pool` AND `initiator == address(this)`
   - Use `forceApprove` (SafeERC20) not `approve` — handles non-standard tokens like USDT
   - No deadline in Uniswap SwapRouter02 (it was removed; use SwapRouter02 not SwapRouter)
   - Profit accumulates in contract; owner calls `withdraw()` separately
+  - Profit check underflow guard: use `debtBalance > repayment ? debtBalance - repayment : 0` as the `got` arg in `InsufficientProfit` — prevents Solidity 0.8 arithmetic panic (0x11) from masking the real revert reason when debtBalance < repayment
 
 ### v2 architecture — no flash loan cap
 **What happened:** N/A — captured from planning phase.

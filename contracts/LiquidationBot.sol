@@ -55,7 +55,7 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
     /// @param collateralAsset  The asset to seize from the borrower.
     /// @param debtAsset        The asset to repay on behalf of the borrower.
     /// @param userToLiquidate  The underwater borrower address.
-    /// @param debtToCover      Amount of debt to repay. Pass type(uint256).max to let Aave choose max.
+    /// @param debtToCover      Amount of debt to repay (exact amount, matched to flash loan size).
     /// @param uniswapPoolFee   Uniswap v3 fee tier for collateral→debt swap (100/500/3000/10000).
     /// @param minProfitWei     Minimum acceptable profit in debtAsset units. Reverts if not met.
     function liquidate(
@@ -107,7 +107,7 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
             p.collateralAsset,
             p.debtAsset,
             p.userToLiquidate,
-            type(uint256).max,  // let Aave determine max liquidatable amount
+            amount,             // exact flash loan amount — matches forceApprove above
             false               // receive underlying token, not aToken
         );
         uint256 collateralReceived = IERC20(p.collateralAsset).balanceOf(address(this)) - collateralBefore;
@@ -116,6 +116,10 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
         uint256 debtAssetReceived = amount; // will be updated if we swap
         if (p.collateralAsset != p.debtAsset && collateralReceived > 0) {
             uint256 repaymentDue = amount + premium;
+            uint256 leftover = IERC20(asset).balanceOf(address(this));
+            uint256 target = repaymentDue + p.minProfitWei;
+            uint256 requiredFromSwap = target > leftover ? target - leftover : 0;
+
             IERC20(p.collateralAsset).forceApprove(router, collateralReceived);
             debtAssetReceived = ISwapRouter(router).exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
@@ -124,7 +128,7 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
                     fee:               p.uniswapPoolFee,
                     recipient:         address(this),
                     amountIn:          collateralReceived,
-                    amountOutMinimum:  repaymentDue + p.minProfitWei,
+                    amountOutMinimum:  requiredFromSwap,
                     sqrtPriceLimitX96: 0
                 })
             );
@@ -134,7 +138,10 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
         uint256 repayment = amount + premium;
         uint256 debtBalance = IERC20(asset).balanceOf(address(this));
         if (debtBalance < repayment + p.minProfitWei) {
-            revert InsufficientProfit(debtBalance - repayment, p.minProfitWei);
+            revert InsufficientProfit(
+                debtBalance > repayment ? debtBalance - repayment : 0,
+                p.minProfitWei
+            );
         }
         IERC20(asset).forceApprove(pool, repayment);
 
