@@ -61,7 +61,7 @@ pub const ARBITRUM: ChainConfig = ChainConfig {
     // Verified: https://docs.aave.com/developers/deployed-contracts/v3-mainnet/arbitrum
     aave_pool:          "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
     aave_data_provider: "0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654",
-    aave_oracle:        "0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C",
+    aave_oracle:        "0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C7",
     history_blocks: 1_036_800, // 3 days @ ~4 blocks/sec
     stable_tokens: &[
         "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // USDC
