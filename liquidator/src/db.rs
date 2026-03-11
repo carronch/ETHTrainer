@@ -17,8 +17,68 @@ impl Db {
     pub fn open(path: &str, chain: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        conn.execute_batch(Self::SCHEMA_SQL)?;
         Ok(Self { conn, chain: chain.to_string() })
     }
+
+    const SCHEMA_SQL: &'static str = "
+        CREATE TABLE IF NOT EXISTS liquidation_watchlist (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            address               TEXT NOT NULL,
+            network               TEXT NOT NULL DEFAULT 'arbitrum',
+            first_seen_block      TEXT,
+            last_checked_block    TEXT,
+            last_health_factor    TEXT,
+            total_collateral_usd  REAL,
+            total_debt_usd        REAL,
+            is_active             INTEGER NOT NULL DEFAULT 1,
+            created_at            INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at            INTEGER NOT NULL DEFAULT (unixepoch()),
+            UNIQUE(address, network)
+        );
+        CREATE TABLE IF NOT EXISTS trades (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_hash      TEXT UNIQUE,
+            strategy     TEXT NOT NULL,
+            action       TEXT NOT NULL,
+            network      TEXT NOT NULL DEFAULT 'arbitrum',
+            from_addr    TEXT NOT NULL,
+            to_addr      TEXT NOT NULL,
+            value_wei    TEXT NOT NULL DEFAULT '0',
+            gas_used     TEXT,
+            gas_price    TEXT,
+            status       TEXT NOT NULL DEFAULT 'pending',
+            profit_eth   REAL,
+            notes        TEXT,
+            created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+            confirmed_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS missed_opportunities (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            borrower          TEXT NOT NULL,
+            collateral_asset  TEXT NOT NULL,
+            debt_asset        TEXT NOT NULL,
+            profit_missed_eth REAL,
+            winner_address    TEXT NOT NULL,
+            winner_gas_gwei   REAL,
+            block_number      INTEGER NOT NULL,
+            timestamp         INTEGER NOT NULL DEFAULT (unixepoch()),
+            chain             TEXT NOT NULL DEFAULT 'arbitrum',
+            analyzed          INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS agent_logs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent      TEXT NOT NULL,
+            level      TEXT NOT NULL DEFAULT 'info',
+            message    TEXT NOT NULL,
+            metadata   TEXT,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_watchlist_network ON liquidation_watchlist (network, is_active);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_hf      ON liquidation_watchlist (last_health_factor);
+        CREATE INDEX IF NOT EXISTS idx_missed_opps_chain ON missed_opportunities (chain, analyzed);
+        CREATE INDEX IF NOT EXISTS idx_trades_status     ON trades (status);
+    ";
 
     // ── Watchlist reads ───────────────────────────────────────────────────────
 
