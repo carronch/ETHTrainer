@@ -20,8 +20,8 @@ import { loadTradingWallet, getTradingAccount } from '../src/wallet/keystore.js'
 
 loadDotenv({ path: '.dev.vars' })
 
-const AAVE_POOL_BASE = '0xA238Dd80C259a72e81d7e4664032E3C44F59Babb'
-const UNISWAP_ROUTER_BASE = '0x2626664c2603336E57B271c5C0b26F421741e481'
+const AAVE_POOL_BASE = getAddress('0xA238Dd80C259a72e81d7e4664032E3C44F59Babb')
+const UNISWAP_ROUTER_BASE = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481')
 
 async function main() {
   const rpcUrl = process.env.BASE_RPC_URL
