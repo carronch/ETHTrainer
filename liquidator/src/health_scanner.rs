@@ -77,6 +77,8 @@ impl<P: Provider> HealthScanner<P> {
                 }
                 Err(e) => warn!("Batch health check failed: {e}"),
             }
+            // Sleep 500ms between large batches to be nice to the RPC node
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
         if !liquidatable.is_empty() {
@@ -107,46 +109,49 @@ impl<P: Provider> HealthScanner<P> {
     // ── Private ───────────────────────────────────────────────────────────────
 
     async fn batch_check(&self, addresses: &[Address]) -> Result<Vec<AccountData>> {
-        // Build multicall batch
-        let pool = IAavePool::new(self.pool, self.provider.clone());
         let mut out = Vec::with_capacity(addresses.len());
 
-        // Execute concurrent calls via join_all
-        let futures: Vec<_> = addresses
-            .iter()
-            .copied()
-            .map(|addr| {
-                let provider = self.provider.clone();
-                let pool_addr = self.pool;
-                async move {
-                    IAavePool::new(pool_addr, provider)
-                        .getUserAccountData(addr)
-                        .call()
-                        .await
-                }
-            })
-            .collect();
-        let results = futures::future::join_all(futures).await;
-
-        for (i, result) in results.into_iter().enumerate() {
-            match result {
-                Ok(data) => {
-                    // Skip accounts with no debt
-                    if data.totalDebtBase == U256::ZERO {
-                        continue;
+        // Process inside batch_check in micro-chunks of 5 to strictly enforce RPC rate limits
+        for micro_chunk in addresses.chunks(5) {
+            let futures: Vec<_> = micro_chunk
+                .iter()
+                .copied()
+                .map(|addr| {
+                    let provider = self.provider.clone();
+                    let pool_addr = self.pool;
+                    async move {
+                        IAavePool::new(pool_addr, provider)
+                            .getUserAccountData(addr)
+                            .call()
+                            .await
                     }
-                    out.push(AccountData {
-                        address: addresses[i],
-                        total_collateral_base: data.totalCollateralBase.to::<u128>(),
-                        total_debt_base: data.totalDebtBase.to::<u128>(),
-                        health_factor: data.healthFactor.to::<u128>(),
-                        liquidation_threshold: data.currentLiquidationThreshold.to::<u128>(),
-                    });
-                }
-                Err(e) => {
-                    warn!(address = ?addresses[i], "getUserAccountData failed: {e}");
+                })
+                .collect();
+                
+            let results = futures::future::join_all(futures).await;
+
+            for (i, result) in results.into_iter().enumerate() {
+                match result {
+                    Ok(data) => {
+                        if data.totalDebtBase == U256::ZERO {
+                            continue;
+                        }
+                        out.push(AccountData {
+                            address: micro_chunk[i],
+                            total_collateral_base: data.totalCollateralBase.to::<u128>(),
+                            total_debt_base: data.totalDebtBase.to::<u128>(),
+                            health_factor: data.healthFactor.to::<u128>(),
+                            liquidation_threshold: data.currentLiquidationThreshold.to::<u128>(),
+                        });
+                    }
+                    Err(e) => {
+                        warn!(address = ?micro_chunk[i], "getUserAccountData failed: {e}");
+                    }
                 }
             }
+            
+            // Sleep between micro-chunks to ensure we stay under 330 CUPS
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
 
         Ok(out)
