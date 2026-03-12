@@ -104,8 +104,8 @@ pub const BASE: ChainConfig = ChainConfig {
     rpc_url_env: "BASE_RPC_URL",
     rpc_ws_url_env: "BASE_RPC_URL_WS",
     bot_address_env: "LIQUIDATION_BOT_ADDRESS_BASE",
-    // ⚠️ Verify at: https://docs.aave.com/developers/deployed-contracts/v3-mainnet/base
-    aave_pool:          "0xA238Dd80C259a72e81d7e4664032E3C44F59Babb",
+    // ⚠️ Verified at bgd-labs aave-address-book
+    aave_pool:          "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
     aave_data_provider: "0x2d8A3C5677189723C4cB8873CfC9C8976ddf54D8",
     aave_oracle:        "0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156",
     history_blocks: 129_600, // 3 days @ ~2 sec/block
