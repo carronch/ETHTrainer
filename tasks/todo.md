@@ -92,10 +92,10 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
   - Note: `--live` flag does not exist; removing `--shadow` = live mode
 
 ### Known Limitations (non-blocking)
-- Alchemy free tier: historical Borrow seed fails on Arbitrum (10-block max). Watchlist builds via WS only (172 addresses). Upgrade to PAYG when profitable.
+- Alchemy PAYG: upgraded from free tier. Arbitrum watchlist builds via WS events (172 addresses) — grows organically over time.
 - The Graph hosted endpoint dead: seed-params uses conservative defaults only.
 - Base watchlist seeded historically (55,164 addresses) — higher liquidation opportunity density than Arbitrum.
-- Kernel upgrade pending on Hetzner (6.8.0-90 → 6.8.0-106) — schedule reboot during quiet period.
+- Kernel upgraded on Hetzner (6.8.0-106) — reboot complete 2026-03-16.
 
 ---
 
@@ -111,7 +111,8 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 
 - [ ] Add Radiant Capital (Parked — recent $50M exploit, TVL too low)
 - [ ] Add The Graph complete borrower coverage (all current borrowers, not just recent events)
-- [/] Aave v3 Base + Optimism (Base integration in progress)
+- [x] Aave v3 Base — live 2026-03-16
+- [ ] Aave v3 Optimism
 
 ---
 
