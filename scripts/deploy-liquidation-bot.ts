@@ -1,18 +1,20 @@
 /**
- * Deploy LiquidationBot to Arbitrum.
+ * Deploy LiquidationBot to Arbitrum, Base, or Optimism.
  *
  * Usage:
- *   npm run deploy:liquidation
+ *   npm run deploy:liquidation                    # deploys to arbitrum (default)
+ *   NETWORK=optimism npm run deploy:liquidation   # deploys to optimism
+ *   NETWORK=base     npm run deploy:liquidation   # deploys to base
  *
  * Prerequisites:
- *   1. npm run compile           — compile the Solidity contract
- *   2. Fill in .dev.vars         — ARBITRUM_RPC_URL + wallet credentials
- *   3. Trading wallet needs ETH on Arbitrum for gas
+ *   1. npm run compile               — compile the Solidity contract
+ *   2. Fill in .dev.vars             — <CHAIN>_RPC_URL + wallet credentials
+ *   3. Trading wallet needs ETH on the target chain for gas
  *
- * After deployment: set LIQUIDATION_BOT_ADDRESS=0x... in .dev.vars
+ * After deployment: the script auto-updates .dev.vars with the contract address.
  */
 import { createPublicClient, createWalletClient, http, getAddress } from 'viem'
-import { arbitrum } from 'viem/chains'
+import { arbitrum, optimism, base } from 'viem/chains'
 import { config as loadDotenv } from 'dotenv'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -20,13 +22,40 @@ import { loadTradingWallet, getTradingAccount } from '../src/wallet/keystore.js'
 
 loadDotenv({ path: '.dev.vars' })
 
-const AAVE_POOL_ARBITRUM    = '0x794a61358D6845594F94dc1DB02A252b5b4814aD'
-const UNISWAP_ROUTER_ARBITRUM = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
+// Aave v3 Pool and Uniswap SwapRouter02 share the same addresses on all three chains.
+const AAVE_POOL    = '0x794a61358D6845594F94dc1DB02A252b5b4814aD'
+const UNISWAP_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
+
+const CHAIN_CONFIGS = {
+  arbitrum: {
+    chain:       arbitrum,
+    rpcEnvKey:   'ARBITRUM_RPC_URL',
+    addressEnvKey: 'LIQUIDATION_BOT_ADDRESS',
+  },
+  optimism: {
+    chain:       optimism,
+    rpcEnvKey:   'OPTIMISM_RPC_URL',
+    addressEnvKey: 'LIQUIDATION_BOT_ADDRESS_OPTIMISM',
+  },
+  base: {
+    chain:       base,
+    rpcEnvKey:   'BASE_RPC_URL',
+    addressEnvKey: 'LIQUIDATION_BOT_ADDRESS_BASE',
+  },
+} as const
+
+type SupportedNetwork = keyof typeof CHAIN_CONFIGS
 
 async function main() {
-  const rpcUrl = process.env.ARBITRUM_RPC_URL
+  const network = (process.env['NETWORK'] ?? 'arbitrum') as SupportedNetwork
+  const chainConfig = CHAIN_CONFIGS[network]
+  if (!chainConfig) {
+    throw new Error(`Unsupported NETWORK="${network}". Supported: arbitrum, optimism, base`)
+  }
+
+  const rpcUrl = process.env[chainConfig.rpcEnvKey]
   if (!rpcUrl) {
-    throw new Error('ARBITRUM_RPC_URL not set in .dev.vars')
+    throw new Error(`${chainConfig.rpcEnvKey} not set in .dev.vars`)
   }
 
   // Load compiled bytecode from hardhat artifacts
@@ -42,15 +71,17 @@ async function main() {
   await loadTradingWallet(keystorePath, 'ethtrainer', 'trading-wallet')
   const account = getTradingAccount()
 
-  const publicClient = createPublicClient({ chain: arbitrum, transport: http(rpcUrl) })
-  const walletClient = createWalletClient({ chain: arbitrum, transport: http(rpcUrl), account })
+  const { chain } = chainConfig
+  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) })
+  const walletClient = createWalletClient({ chain, transport: http(rpcUrl), account })
 
   const balance = await publicClient.getBalance({ address: account.address })
+  console.log(`Network:  ${network} (chain ID ${chain.id})`)
   console.log(`Deployer: ${account.address}`)
-  console.log(`Balance on Arbitrum: ${(Number(balance) / 1e18).toFixed(6)} ETH`)
+  console.log(`Balance:  ${(Number(balance) / 1e18).toFixed(6)} ETH`)
 
-  if (balance < 500_000n * 400_000n) { // rough gas estimate
-    console.warn('⚠️  Low ETH balance on Arbitrum — may not cover deployment gas')
+  if (balance < 500_000n * 400_000n) {
+    console.warn('⚠️  Low ETH balance — may not cover deployment gas')
   }
 
   console.log('\nDeploying LiquidationBot...')
@@ -58,9 +89,9 @@ async function main() {
   const hash = await walletClient.deployContract({
     abi:      artifact.abi,
     bytecode: artifact.bytecode,
-    args:     [AAVE_POOL_ARBITRUM, UNISWAP_ROUTER_ARBITRUM],
+    args:     [AAVE_POOL, UNISWAP_ROUTER],
     account,
-    chain: arbitrum,
+    chain,
   })
 
   console.log(`Deploy tx: ${hash}`)
@@ -74,15 +105,16 @@ async function main() {
 
   const contractAddress = getAddress(receipt.contractAddress)
   console.log(`\n✅ LiquidationBot deployed at: ${contractAddress}`)
-  console.log(`\nAdd to .dev.vars:\n  LIQUIDATION_BOT_ADDRESS=${contractAddress}`)
+  console.log(`\nAdd to .dev.vars:\n  ${chainConfig.addressEnvKey}=${contractAddress}`)
 
-  // Optionally update .dev.vars automatically
+  // Auto-update .dev.vars
   try {
     let devVars = readFileSync('.dev.vars', 'utf8')
-    if (devVars.includes('LIQUIDATION_BOT_ADDRESS=')) {
-      devVars = devVars.replace(/LIQUIDATION_BOT_ADDRESS=.*/, `LIQUIDATION_BOT_ADDRESS=${contractAddress}`)
+    const key = chainConfig.addressEnvKey
+    if (devVars.includes(`${key}=`)) {
+      devVars = devVars.replace(new RegExp(`${key}=.*`), `${key}=${contractAddress}`)
     } else {
-      devVars += `\nLIQUIDATION_BOT_ADDRESS=${contractAddress}\n`
+      devVars += `\n${key}=${contractAddress}\n`
     }
     writeFileSync('.dev.vars', devVars)
     console.log('✅ .dev.vars updated automatically')
