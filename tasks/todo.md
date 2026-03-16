@@ -85,23 +85,17 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 - [x] Bug fix: `db.rs` `open()` never created SQLite schema → added `CREATE TABLE IF NOT EXISTS` on open
 - [x] TS monitor started via pm2 (`ethtrainer-ts` — health watchdog + autoresearch scheduler)
 - [x] Telegram alerts working
-- [x] **72h Shadow mode running** — started 2026-03-11 ~19:41 UTC, `watchlist_size=1` at cycle 50
-
-### In Progress
-- [ ] **Monitor shadow logs** — check `journalctl -u liquidator -n 30 --no-pager` periodically
-  - Look for: `Scan cycle complete watchlist_size=N` (N growing) and `[SHADOW] Would have earned X ETH`
-  - If `watchlist_size=0` after 24h, investigate WS subscription
-- [ ] **Go live after 72h** (after 2026-03-14 ~19:41 UTC):
-  ```bash
-  systemctl edit liquidator --force   # change --shadow → --live
-  systemctl daemon-reload && systemctl restart liquidator
-  ```
+- [x] **72h Shadow mode ran** — Arbitrum cycle 8700+ (watchlist=172), Base cycle running (watchlist=55,164)
+- [x] **Go live** — 2026-03-16 ~15:56 UTC
+  - `liquidator-arbitrum.service`: `--chain arbitrum` (no --shadow), live
+  - `liquidator-base.service`: `--chain base` (no --shadow), live
+  - Note: `--live` flag does not exist; removing `--shadow` = live mode
 
 ### Known Limitations (non-blocking)
-- Alchemy free tier: historical Borrow seed fails (10-block max range). Watchlist builds via WS only. Upgrade to PAYG when profitable.
+- Alchemy free tier: historical Borrow seed fails on Arbitrum (10-block max). Watchlist builds via WS only (172 addresses). Upgrade to PAYG when profitable.
 - The Graph hosted endpoint dead: seed-params uses conservative defaults only.
-
-> Anvil fork validation skipped — shadow mode on real Arbitrum RPC provides equivalent signal.
+- Base watchlist seeded historically (55,164 addresses) — higher liquidation opportunity density than Arbitrum.
+- Kernel upgrade pending on Hetzner (6.8.0-90 → 6.8.0-106) — schedule reboot during quiet period.
 
 ---
 

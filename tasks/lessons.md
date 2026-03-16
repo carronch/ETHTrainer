@@ -101,3 +101,8 @@ Purpose: prevent the same mistake from happening twice.
 **What happened:** TypeScript error: `Conversion of type 'HeuristicParams' to type 'Record<string, unknown>' may be a mistake`.
 **Root cause:** TS won't directly cast a typed interface to an index signature type.
 **Rule:** Use `as unknown as Record<string, unknown>` (double cast) when you need to iterate over a typed interface's keys. This is intentional and correct — don't suppress with `@ts-ignore`.
+
+### Rust liquidator has no --live flag — absence of --shadow IS live mode
+**What happened:** Instructed user to change `--shadow` to `--live` in systemd service. Binary rejected `--live` as unknown argument, causing a crash loop.
+**Root cause:** Assumed symmetrical flags (`--shadow` / `--live`). The actual CLI only has `--shadow` (boolean flag). Without it, the binary runs in live mode by default.
+**Rule:** To go live: remove `--shadow` from ExecStart. Do NOT add `--live`. Correct ExecStart: `liquidator --chain arbitrum` (no shadow flag). Always check `liquidator --help` before writing CLI args.
