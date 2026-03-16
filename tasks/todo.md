@@ -112,7 +112,7 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 - [ ] Add Radiant Capital (Parked — recent $50M exploit, TVL too low)
 - [ ] Add The Graph complete borrower coverage (all current borrowers, not just recent events)
 - [x] Aave v3 Base — live 2026-03-16
-- [x] Aave v3 Optimism — shadow mode started 2026-03-16, contract: 0xE108aCF99820554f0A577d8aa164e84cf08f2125
+- [x] Aave v3 Optimism — live 2026-03-16, contract: 0xE108aCF99820554f0A577d8aa164e84cf08f2125, watchlist=4375
 
 ---
 
