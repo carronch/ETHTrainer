@@ -2,6 +2,14 @@
 
 > Autonomous ETH accumulation system. Liquidation bots on Arbitrum → accumulate 32 ETH → spin up Ethereum validator.
 
+## AI Session Start — MANDATORY
+
+**Before doing anything else, read these two files:**
+1. `tasks/lessons.md` — project-specific rules learned from past corrections. These override default behavior.
+2. `tasks/todo.md` — current work state and phase tracker.
+
+Skipping these will cause repeated mistakes.
+
 ## Goals
 
 1. Pay for the Hetzner server (self-funding)
