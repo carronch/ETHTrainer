@@ -10,6 +10,7 @@
 use crate::config::HeuristicParams;
 use crate::db::Db;
 use crate::types::{LiquidationOpportunity, LiquidationResult};
+use std::sync::Mutex;
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
@@ -92,7 +93,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
     pub async fn execute(
         &self,
         opp: &LiquidationOpportunity,
-        db: &Db,
+        db: &Arc<Mutex<Db>>,
         params: &HeuristicParams,
     ) -> LiquidationResult {
         // ── Circuit breaker ────────────────────────────────────────────────────
@@ -168,7 +169,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
                 profit_eth,
                 "[SHADOW] Would have submitted liquidation"
             );
-            db.log("info", &format!("[SHADOW] liquidation opportunity: borrower={:?} profit_eth={:.6}", opp.borrower, profit_eth), None);
+            db.lock().unwrap().log("info", &format!("[SHADOW] liquidation opportunity: borrower={:?} profit_eth={:.6}", opp.borrower, profit_eth), None);
             return LiquidationResult {
                 success: true,
                 tx_hash: None,
@@ -182,7 +183,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
         }
 
         // ── Live: submit the transaction ───────────────────────────────────────
-        let row_id = db
+        let row_id = db.lock().unwrap()
             .insert_trade_pending(
                 &opp.borrower.to_string(),
                 &opp.collateral_symbol,
@@ -205,7 +206,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
                     Ok(receipt) if receipt.status() => {
                         let profit_eth = opp.estimated_profit_wei as f64 / 1e18;
                         let gas_used = receipt.gas_used;
-                        let _ = db.confirm_trade(row_id, &tx_hash, "confirmed", Some(profit_eth), Some(gas_used), Some(gas_price));
+                        let _ = db.lock().unwrap().confirm_trade(row_id, &tx_hash, "confirmed", Some(profit_eth), Some(gas_used), Some(gas_price));
                         self.circuit_breaker.lock().unwrap().record_success();
                         info!(tx_hash, profit_eth, "Liquidation confirmed!");
                         LiquidationResult {
@@ -221,7 +222,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
                     }
                     Ok(receipt) => {
                         let gas_used = receipt.gas_used;
-                        let _ = db.confirm_trade(row_id, &tx_hash, "failed", None, Some(gas_used), Some(gas_price));
+                        let _ = db.lock().unwrap().confirm_trade(row_id, &tx_hash, "failed", None, Some(gas_used), Some(gas_price));
                         self.circuit_breaker.lock().unwrap().record_failure(
                             params.circuit_breaker_failures,
                             params.circuit_breaker_pause_secs,
@@ -230,7 +231,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
                         self.fail_result(opp, "tx reverted")
                     }
                     Err(e) => {
-                        let _ = db.confirm_trade(row_id, &tx_hash, "failed", None, None, None);
+                        let _ = db.lock().unwrap().confirm_trade(row_id, &tx_hash, "failed", None, None, None);
                         self.circuit_breaker.lock().unwrap().record_failure(
                             params.circuit_breaker_failures,
                             params.circuit_breaker_pause_secs,
@@ -240,7 +241,7 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
                 }
             }
             Err(e) => {
-                let _ = db.confirm_trade(row_id, "", "failed", None, None, None);
+                let _ = db.lock().unwrap().confirm_trade(row_id, "", "failed", None, None, None);
                 self.circuit_breaker.lock().unwrap().record_failure(
                     params.circuit_breaker_failures,
                     params.circuit_breaker_pause_secs,

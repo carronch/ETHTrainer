@@ -223,17 +223,37 @@ async fn main() -> Result<()> {
         cycle += 1;
         let params = shared_params.read().unwrap().clone();
 
-        // Scan watchlist for liquidatable positions
-        let liquidatable = {
+        // Load watchlist (brief lock — synchronous only)
+        let addresses = {
             let db_lock = db.lock().unwrap();
-            match health_scanner.scan_watchlist(&db_lock, &params).await {
-                Ok(list) => list,
-                Err(e) => {
-                    error!("Health scan failed: {e}");
-                    vec![]
-                }
+            match db_lock.get_active_watchlist() {
+                Ok(a) => a,
+                Err(e) => { error!("Failed to read watchlist: {e}"); vec![] }
             }
         };
+
+        // Scan health factors — no lock held across async RPC calls
+        let scanned = health_scanner.scan_addresses(&addresses, &params).await;
+
+        // Write health factor updates back (brief lock per batch — synchronous only)
+        let liquidatable: Vec<_> = {
+            let db_lock = db.lock().unwrap();
+            scanned.into_iter().filter(|data| {
+                let collateral_usd = data.total_collateral_base as f64 / 1e8;
+                let debt_usd = data.total_debt_base as f64 / 1e8;
+                let _ = db_lock.update_health_factor(
+                    &data.address.to_string(),
+                    data.health_factor,
+                    collateral_usd,
+                    debt_usd,
+                );
+                data.health_factor < 1_000_000_000_000_000_000u128
+            }).collect()
+        };
+
+        if !liquidatable.is_empty() {
+            info!(found = liquidatable.len(), scanned = addresses.len(), "Liquidatable positions found");
+        }
 
         // Process each liquidatable position
         for account in &liquidatable {
@@ -248,8 +268,7 @@ async fn main() -> Result<()> {
                         "Liquidation opportunity found"
                     );
 
-                    let db_lock = db.lock().unwrap();
-                    let result = tx_submitter.execute(&opp, &db_lock, &params).await;
+                    let result = tx_submitter.execute(&opp, &db, &params).await;
 
                     if result.success {
                         if args.shadow {

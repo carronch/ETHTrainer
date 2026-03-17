@@ -3,7 +3,6 @@
 /// returns those with health factor < 1e18 (liquidatable).
 
 use crate::config::HeuristicParams;
-use crate::db::Db;
 use crate::types::AccountData;
 use alloy::{
     primitives::{Address, U256},
@@ -40,56 +39,30 @@ impl<P: Provider> HealthScanner<P> {
         Ok(Self { provider, pool })
     }
 
-    /// Scan all active watchlist addresses in batches.
-    /// Returns liquidatable positions (health factor < 1e18).
-    pub async fn scan_watchlist(
+    /// Scan a slice of addresses in batches. Returns all scanned results so the
+    /// caller can update the DB and filter for liquidatable positions without
+    /// holding any mutex across async RPC calls.
+    pub async fn scan_addresses(
         &self,
-        db: &Db,
+        addresses: &[Address],
         params: &HeuristicParams,
-    ) -> Result<Vec<AccountData>> {
-        let addresses = db.get_active_watchlist()?;
+    ) -> Vec<AccountData> {
         if addresses.is_empty() {
-            return Ok(vec![]);
+            return vec![];
         }
 
-        let total = addresses.len();
-        let mut liquidatable = Vec::new();
+        let mut results = Vec::new();
 
         for chunk in addresses.chunks(params.scan_batch_size) {
             match self.batch_check(chunk).await {
-                Ok(results) => {
-                    for data in results {
-                        // Update health factor in SQLite
-                        let collateral_usd = data.total_collateral_base as f64 / 1e8;
-                        let debt_usd = data.total_debt_base as f64 / 1e8;
-                        let _ = db.update_health_factor(
-                            &data.address.to_string(),
-                            data.health_factor,
-                            collateral_usd,
-                            debt_usd,
-                        );
-
-                        // Liquidatable: HF < 1e18
-                        if data.health_factor < 1_000_000_000_000_000_000u128 {
-                            liquidatable.push(data);
-                        }
-                    }
-                }
+                Ok(batch) => results.extend(batch),
                 Err(e) => warn!("Batch health check failed: {e}"),
             }
             // Sleep 500ms between large batches to be nice to the RPC node
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
-        if !liquidatable.is_empty() {
-            info!(
-                found = liquidatable.len(),
-                scanned = total,
-                "Liquidatable positions found"
-            );
-        }
-
-        Ok(liquidatable)
+        results
     }
 
     /// Check a single address (used for pre-flight confirmation before submission).
