@@ -11,7 +11,7 @@ module.exports = {
     {
       name: 'liquidator-arbitrum',
       script: './target/release/liquidator',
-      args: '--chain arbitrum --live',
+      args: '--chain arbitrum',
       interpreter: 'none',
       env: { RUST_LOG: 'liquidator=info' },
       autorestart: true,
@@ -27,7 +27,7 @@ module.exports = {
     {
       name: 'liquidator-base',
       script: './target/release/liquidator',
-      args: '--chain base --live',
+      args: '--chain base',
       interpreter: 'none',
       env: { RUST_LOG: 'liquidator=info' },
       autorestart: true,
@@ -43,7 +43,7 @@ module.exports = {
     {
       name: 'liquidator-optimism',
       script: './target/release/liquidator',
-      args: '--chain optimism --live',
+      args: '--chain optimism',
       interpreter: 'none',
       env: { RUST_LOG: 'liquidator=info' },
       autorestart: true,
