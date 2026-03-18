@@ -79,7 +79,7 @@ impl MissedTracker {
                                             // Fetch winner's gas price from the transaction
                                             let winner_gas_gwei = if let Some(tx_hash) = log.transaction_hash {
                                                 match provider.get_transaction_by_hash(tx_hash).await {
-                                                    Ok(Some(tx)) => tx.gas_price
+                                                    Ok(Some(tx)) => tx.effective_gas_price
                                                         .map(|p| p as f64 / 1e9)
                                                         .unwrap_or(0.0),
                                                     _ => 0.0,
