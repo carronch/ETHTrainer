@@ -15,6 +15,7 @@ mod config;
 mod db;
 mod event_listener;
 mod health_scanner;
+mod hot_tracker;
 mod missed_tracker;
 mod opportunity_ranker;
 mod tx_submitter;
@@ -24,6 +25,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use config::HeuristicParams;
 use dotenvy::dotenv;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
@@ -160,8 +162,8 @@ async fn main() -> Result<()> {
 
     // ── Components ────────────────────────────────────────────────────────────
 
-    let health_scanner     = health_scanner::HealthScanner::new(provider.clone(), chain.aave_pool)?;
-    let opportunity_ranker = opportunity_ranker::OpportunityRanker::new(
+    let health_scanner     = Arc::new(health_scanner::HealthScanner::new(provider.clone(), chain.aave_pool)?);
+    let opportunity_ranker = Arc::new(opportunity_ranker::OpportunityRanker::new(
         provider.clone(),
         chain.aave_pool,
         chain.aave_data_provider,
@@ -170,8 +172,8 @@ async fn main() -> Result<()> {
         chain.major_tokens,
         chain.weth_address,
         chain.token_symbols(),
-    )?;
-    let tx_submitter   = tx_submitter::TxSubmitter::new(provider.clone(), bot_address, pool_address, args.shadow);
+    )?);
+    let tx_submitter   = Arc::new(tx_submitter::TxSubmitter::new(provider.clone(), bot_address, pool_address, args.shadow));
     let event_listener = event_listener::EventListener::new(chain.aave_pool, chain.history_blocks)?;
     let missed_tracker = missed_tracker::MissedTracker::new(chain.aave_pool)?;
 
@@ -194,6 +196,10 @@ async fn main() -> Result<()> {
         }
     }
 
+    // In-flight dedup set — shared between hot tracker and main loop.
+    let in_flight: Arc<std::sync::Mutex<HashSet<alloy::primitives::Address>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
+
     // ── Live event subscriptions (WebSocket) ──────────────────────────────────
     // Best-effort — bot works without WS but won't pick up new borrowers in real-time.
     if let Some(ws_url) = rpc_ws_url {
@@ -204,7 +210,17 @@ async fn main() -> Result<()> {
             Ok(ws_provider) => {
                 let ws_provider = Arc::new(ws_provider);
                 event_listener.spawn_live_watch(ws_provider.clone(), db.clone());
-                missed_tracker.spawn(ws_provider, db.clone());
+                missed_tracker.spawn(ws_provider.clone(), db.clone());
+                hot_tracker::spawn(
+                    ws_provider.clone(),
+                    db.clone(),
+                    health_scanner.clone(),
+                    opportunity_ranker.clone(),
+                    tx_submitter.clone(),
+                    shared_params.clone(),
+                    in_flight.clone(),
+                    chain.name,
+                );
                 info!("WebSocket subscriptions active");
             }
             Err(e) => warn!("WS connection failed: {e}. Live events disabled."),
@@ -274,17 +290,31 @@ async fn main() -> Result<()> {
                         "Liquidation opportunity found"
                     );
 
-                    let result = tx_submitter.execute(&opp, &db, &params).await;
-
-                    if result.success {
-                        if args.shadow {
-                            info!(profit_eth = result.profit_eth, "[SHADOW] Would have earned");
+                    // Skip if hot tracker already submitted for this borrower
+                    let already_in_flight = {
+                        let mut flight = in_flight.lock().unwrap();
+                        if flight.contains(&opp.borrower) {
+                            true
                         } else {
-                            info!(
-                                tx_hash = result.tx_hash,
-                                profit_eth = result.profit_eth,
-                                "Liquidation SUCCESS"
-                            );
+                            flight.insert(opp.borrower);
+                            false
+                        }
+                    };
+
+                    if !already_in_flight {
+                        let result = tx_submitter.execute(&opp, &db, &params).await;
+                        in_flight.lock().unwrap().remove(&opp.borrower);
+
+                        if result.success {
+                            if args.shadow {
+                                info!(profit_eth = result.profit_eth, "[SHADOW] Would have earned");
+                            } else {
+                                info!(
+                                    tx_hash = result.tx_hash,
+                                    profit_eth = result.profit_eth,
+                                    "Liquidation SUCCESS"
+                                );
+                            }
                         }
                     }
                 }

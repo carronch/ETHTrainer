@@ -118,6 +118,29 @@ impl Db {
         Ok(addresses)
     }
 
+    /// Fetch all active addresses in the danger zone — HF between 0.90 and hot_threshold.
+    /// These are scanned on every new block by the hot tracker.
+    pub fn get_danger_zone_watchlist(&self, hf_hot_threshold: f64, cap: usize) -> Result<Vec<alloy::primitives::Address>> {
+        let hf_low  = (0.90 * 1e18) as i64;
+        let hf_high = (hf_hot_threshold * 1e18) as i64;
+        let mut stmt = self.conn.prepare(
+            "SELECT address FROM liquidation_watchlist
+             WHERE network = ? AND is_active = 1
+               AND last_health_factor IS NOT NULL
+               AND CAST(last_health_factor AS INTEGER) BETWEEN ? AND ?
+             ORDER BY CAST(last_health_factor AS REAL) ASC
+             LIMIT ?",
+        )?;
+        let addresses: Vec<alloy::primitives::Address> = stmt
+            .query_map(params![self.chain, hf_low, hf_high, cap as i64], |row| {
+                let addr: String = row.get(0)?;
+                Ok(addr)
+            })?
+            .filter_map(|r| r.ok().and_then(|s: String| s.parse().ok()))
+            .collect();
+        Ok(addresses)
+    }
+
     pub fn is_borrower_watched(&self, address: &str) -> Result<bool> {
         let count: usize = self.conn.query_row(
             "SELECT COUNT(*) FROM liquidation_watchlist WHERE address = ?1 AND network = ?2 AND is_active = 1",

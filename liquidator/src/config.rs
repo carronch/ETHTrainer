@@ -23,6 +23,13 @@ pub struct HeuristicParams {
     /// Positions below this get added to the pre-alert queue.
     pub hf_alert_threshold: f64,
 
+    /// HF threshold below which an address enters the hot-tracker danger zone.
+    /// Hot tracker scans these on every new block (via WS) for sub-block-time detection.
+    pub hf_hot_threshold: f64,
+
+    /// Max addresses to scan per block in the hot tracker (RPC budget cap).
+    pub hot_scan_cap: usize,
+
     /// How often to scan the full watchlist (milliseconds).
     pub scan_interval_ms: u64,
 
@@ -47,11 +54,13 @@ pub struct HeuristicParams {
 impl Default for HeuristicParams {
     fn default() -> Self {
         Self {
-            max_gas_gwei: 2.0,           // raised: Arbitrum can spike above 1.0
-            min_profit_eth: 0.002,        // lowered: 0.005 was missing small but real opps
+            max_gas_gwei: 2.0,
+            min_profit_eth: 0.002,
             hf_alert_threshold: 1.08,
-            scan_interval_ms: 3_000,      // 3s instead of 12s — ~12 blocks per scan on Arbitrum
-            scan_batch_size: 200,         // 4× throughput; 55k-address lists now scan in ~2min
+            hf_hot_threshold: 1.05,       // scan on every block below this HF
+            hot_scan_cap: 50,             // cap per block (RPC budget)
+            scan_interval_ms: 3_000,
+            scan_batch_size: 200,
             gas_estimate_liquidation: 900_000,
             circuit_breaker_failures: 3,
             circuit_breaker_pause_secs: 3600,
