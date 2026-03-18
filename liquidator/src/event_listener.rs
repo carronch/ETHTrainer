@@ -128,30 +128,32 @@ impl EventListener {
                 .address(pool)
                 .event_signature(Borrow::SIGNATURE_HASH);
 
-            match provider.subscribe_logs(&filter).await {
-                Ok(mut stream) => {
-                    loop {
-                        match stream.recv().await {
-                            Ok(log) => {
-                                if let Ok(decoded) = log.log_decode::<Borrow>() {
-                                    let borrower = decoded.data().onBehalfOf;
-                                    let block = log.block_number.unwrap_or(0);
-                                    if let Ok(db_lock) = db.lock() {
-                                        let _ = db_lock.upsert_borrower(&borrower.to_string(), block);
+            loop {
+                match provider.subscribe_logs(&filter).await {
+                    Ok(mut stream) => {
+                        loop {
+                            match stream.recv().await {
+                                Ok(log) => {
+                                    if let Ok(decoded) = log.log_decode::<Borrow>() {
+                                        let borrower = decoded.data().onBehalfOf;
+                                        let block = log.block_number.unwrap_or(0);
+                                        if let Ok(db_lock) = db.lock() {
+                                            let _ = db_lock.upsert_borrower(&borrower.to_string(), block);
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                warn!("Borrow event stream ended: {e}");
-                                break;
+                                Err(e) => {
+                                    warn!("Borrow event stream ended: {e} — reconnecting in 5s");
+                                    break;
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        warn!("Failed to subscribe to Borrow events: {e} — retrying in 5s");
+                    }
                 }
-                Err(e) => {
-                    warn!("Failed to subscribe to Borrow events: {e}");
-                    warn!("Live watchlist updates disabled (WebSocket required)");
-                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
     }

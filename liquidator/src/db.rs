@@ -102,6 +102,15 @@ impl Db {
         Ok(addresses)
     }
 
+    pub fn is_borrower_watched(&self, address: &str) -> Result<bool> {
+        let count: usize = self.conn.query_row(
+            "SELECT COUNT(*) FROM liquidation_watchlist WHERE address = ?1 AND network = ?2 AND is_active = 1",
+            params![address.to_lowercase(), self.chain],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn watchlist_size(&self) -> Result<usize> {
         let n: usize = self.conn.query_row(
             "SELECT COUNT(*) FROM liquidation_watchlist WHERE network = ? AND is_active = 1",
