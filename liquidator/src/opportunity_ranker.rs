@@ -8,7 +8,7 @@
 ///   5. Return the opportunity if profit > min_profit_eth threshold
 
 use crate::config::HeuristicParams;
-use crate::types::{AccountData, LiquidationOpportunity, UserReserveData};
+use crate::types::{AccountData, BatchLiquidationOpportunity, LiquidationOpportunity, RankResult, UserReserveData};
 use alloy::{
     primitives::{Address, U256},
     providers::Provider,
@@ -97,7 +97,7 @@ impl<P: Provider> OpportunityRanker<P> {
         &self,
         account: &AccountData,
         params: &HeuristicParams,
-    ) -> Result<Option<LiquidationOpportunity>> {
+    ) -> Result<RankResult> {
         let reserves = self.get_reserves().await?;
         let (user_data, prices) = tokio::try_join!(
             self.get_user_reserves(account.address, &reserves),
@@ -114,7 +114,7 @@ impl<P: Provider> OpportunityRanker<P> {
             .collect();
 
         if collaterals.is_empty() || debts.is_empty() {
-            return Ok(None);
+            return Ok(RankResult::Ineligible);
         }
 
         // Best debt: largest value in USD
@@ -135,7 +135,7 @@ impl<P: Provider> OpportunityRanker<P> {
         let debt_price       = prices.get(&best_debt.asset).copied().unwrap_or(0);
         let collateral_price = prices.get(&best_collateral.asset).copied().unwrap_or(0);
         if debt_price == 0 || collateral_price == 0 {
-            return Ok(None);
+            return Ok(RankResult::Ineligible);
         }
 
         // Aave v3 close factor: 50% of debt, or 100% if HF < 0.95
@@ -177,39 +177,142 @@ impl<P: Provider> OpportunityRanker<P> {
         let gas_price = self.provider.get_gas_price().await?;
         let gas_cost_wei = params.gas_estimate_liquidation as u128 * gas_price;
 
+        let pool_fee = self.preferred_fee(&best_collateral.asset, &best_debt.asset);
+
+        // Below gas cost — candidate for batching
         if profit_wei <= gas_cost_wei {
-            debug!(borrower = ?account.address, "Skipping: profit < gas cost");
-            return Ok(None);
+            let shortfall_wei = gas_cost_wei - profit_wei;
+            debug!(
+                borrower = ?account.address,
+                profit_eth = profit_wei as f64 / 1e18,
+                gas_eth = gas_cost_wei as f64 / 1e18,
+                "Skipping: profit < gas cost (batch candidate)"
+            );
+            return Ok(RankResult::Skipped {
+                opportunity: LiquidationOpportunity {
+                    borrower: account.address,
+                    collateral_asset: best_collateral.asset,
+                    collateral_symbol: best_collateral.symbol.clone(),
+                    debt_asset: best_debt.asset,
+                    debt_symbol: best_debt.symbol.clone(),
+                    debt_to_cover,
+                    gross_profit_wei: profit_wei,
+                    estimated_profit_wei: 0,
+                    estimated_gas_wei: gas_cost_wei,
+                    uniswap_pool_fee: pool_fee,
+                    min_profit_wei: 0,
+                    health_factor: account.health_factor,
+                },
+                shortfall_wei,
+            });
         }
 
         let net_profit_wei = profit_wei - gas_cost_wei;
 
+        // Above gas cost but below min_profit threshold — also batch candidate
         if net_profit_wei < params.min_profit_wei() {
             debug!(
                 borrower = ?account.address,
                 net_profit_eth = net_profit_wei as f64 / 1e18,
                 min_profit_eth = params.min_profit_eth,
-                "Skipping: below min_profit threshold"
+                "Skipping: below min_profit threshold (batch candidate)"
             );
-            return Ok(None);
+            return Ok(RankResult::Skipped {
+                opportunity: LiquidationOpportunity {
+                    borrower: account.address,
+                    collateral_asset: best_collateral.asset,
+                    collateral_symbol: best_collateral.symbol.clone(),
+                    debt_asset: best_debt.asset,
+                    debt_symbol: best_debt.symbol.clone(),
+                    debt_to_cover,
+                    gross_profit_wei: profit_wei,
+                    estimated_profit_wei: net_profit_wei,
+                    estimated_gas_wei: gas_cost_wei,
+                    uniswap_pool_fee: pool_fee,
+                    min_profit_wei: 0,
+                    health_factor: account.health_factor,
+                },
+                shortfall_wei: params.min_profit_wei() - net_profit_wei,
+            });
         }
 
-        let pool_fee = self.preferred_fee(&best_collateral.asset, &best_debt.asset);
         let min_profit_wei = (net_profit_wei * 80) / 100; // 20% slippage buffer
 
-        Ok(Some(LiquidationOpportunity {
+        Ok(RankResult::Profitable(LiquidationOpportunity {
             borrower: account.address,
             collateral_asset: best_collateral.asset,
             collateral_symbol: best_collateral.symbol.clone(),
             debt_asset: best_debt.asset,
             debt_symbol: best_debt.symbol.clone(),
             debt_to_cover,
+            gross_profit_wei: profit_wei,
             estimated_profit_wei: net_profit_wei,
             estimated_gas_wei: gas_cost_wei,
             uniswap_pool_fee: pool_fee,
             min_profit_wei,
             health_factor: account.health_factor,
         }))
+    }
+
+    /// Group individually-unprofitable positions by debt asset and find batches
+    /// where the collective gross profit exceeds the batch gas cost.
+    ///
+    /// Batch gas model: 300_000 base + 600_000 per position.
+    /// Returns groups of 2+ positions that collectively meet profitability.
+    pub async fn find_batch_candidates(
+        &self,
+        candidates: &[LiquidationOpportunity],
+        params: &HeuristicParams,
+    ) -> Vec<BatchLiquidationOpportunity> {
+        let gas_price = match self.provider.get_gas_price().await {
+            Ok(p) => p,
+            Err(_) => return vec![],
+        };
+
+        const BATCH_BASE_GAS: u128   = 300_000;
+        const PER_POSITION_GAS: u128 = 600_000;
+
+        // Group by debt_asset
+        let mut groups: HashMap<Address, Vec<&LiquidationOpportunity>> = HashMap::new();
+        for opp in candidates {
+            groups.entry(opp.debt_asset).or_default().push(opp);
+        }
+
+        let mut batches = Vec::new();
+        for (debt_asset, group) in groups {
+            if group.len() < 2 {
+                continue;
+            }
+
+            let n = group.len() as u128;
+            let batch_gas_wei = (BATCH_BASE_GAS + PER_POSITION_GAS * n) * gas_price;
+            let total_gross_profit_wei: u128 = group.iter().map(|o| o.gross_profit_wei).sum();
+
+            if total_gross_profit_wei <= batch_gas_wei + params.min_profit_wei() {
+                debug!(
+                    debt_asset = ?debt_asset,
+                    positions = group.len(),
+                    gross_profit_eth = total_gross_profit_wei as f64 / 1e18,
+                    gas_eth = batch_gas_wei as f64 / 1e18,
+                    "Batch not profitable enough"
+                );
+                continue;
+            }
+
+            let net_batch_profit = total_gross_profit_wei - batch_gas_wei;
+            let min_total_profit_wei = (net_batch_profit * 80) / 100;
+
+            batches.push(BatchLiquidationOpportunity {
+                debt_asset,
+                debt_asset_symbol: group[0].debt_symbol.clone(),
+                positions: group.into_iter().cloned().collect(),
+                total_gross_profit_wei,
+                total_estimated_gas_wei: batch_gas_wei,
+                min_total_profit_wei,
+            });
+        }
+
+        batches
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

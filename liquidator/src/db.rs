@@ -2,7 +2,7 @@
 /// Reads the watchlist (written by TS event listener + autoresearch).
 /// Writes trade results and missed opportunities (read by TS autoresearch).
 
-use crate::types::{AccountData, LiquidationResult, MissedOpportunity};
+use crate::types::{AccountData, LiquidationResult, MissedOpportunity, SkippedOpportunity};
 use anyhow::Result;
 use rusqlite::{Connection, params};
 use std::path::Path;
@@ -66,6 +66,21 @@ impl Db {
             chain             TEXT NOT NULL DEFAULT 'arbitrum',
             analyzed          INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS skipped_opportunities (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            borrower                TEXT NOT NULL,
+            debt_asset              TEXT NOT NULL,
+            debt_asset_symbol       TEXT,
+            collateral_asset        TEXT NOT NULL,
+            collateral_asset_symbol TEXT,
+            estimated_profit_eth    REAL NOT NULL,
+            gas_cost_eth            REAL NOT NULL,
+            shortfall_eth           REAL NOT NULL,
+            chain                   TEXT NOT NULL DEFAULT 'arbitrum',
+            timestamp               INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_skipped_chain_ts    ON skipped_opportunities (chain, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_skipped_debt_asset  ON skipped_opportunities (chain, debt_asset);
         CREATE TABLE IF NOT EXISTS agent_logs (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             agent      TEXT NOT NULL,
@@ -239,6 +254,28 @@ impl Db {
                 opp.block_number,
                 opp.timestamp,
                 self.chain,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_skipped(&self, opp: &SkippedOpportunity) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO skipped_opportunities
+             (borrower, debt_asset, debt_asset_symbol, collateral_asset, collateral_asset_symbol,
+              estimated_profit_eth, gas_cost_eth, shortfall_eth, chain, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                opp.borrower.to_string().to_lowercase(),
+                opp.debt_asset.to_string().to_lowercase(),
+                opp.debt_asset_symbol,
+                opp.collateral_asset.to_string().to_lowercase(),
+                opp.collateral_asset_symbol,
+                opp.estimated_profit_eth,
+                opp.gas_cost_eth,
+                opp.shortfall_eth,
+                opp.chain,
+                opp.timestamp,
             ],
         )?;
         Ok(())

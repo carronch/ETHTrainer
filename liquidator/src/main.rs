@@ -28,6 +28,8 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use types::{LiquidationOpportunity, RankResult, SkippedOpportunity};
+use chrono::Utc;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -256,9 +258,11 @@ async fn main() -> Result<()> {
         }
 
         // Process each liquidatable position
+        let mut batch_candidates: Vec<LiquidationOpportunity> = Vec::new();
+
         for account in &liquidatable {
             match opportunity_ranker.find_best(account, &params).await {
-                Ok(Some(opp)) => {
+                Ok(RankResult::Profitable(opp)) => {
                     info!(
                         borrower      = ?opp.borrower,
                         collateral    = opp.collateral_symbol,
@@ -282,11 +286,65 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                Ok(None) => {
-                    // Position liquidatable but opportunity not profitable enough — skip
+                Ok(RankResult::Skipped { opportunity: opp, shortfall_wei }) => {
+                    // Log to DB for autoresearch analysis
+                    let skipped = SkippedOpportunity {
+                        borrower:                opp.borrower,
+                        debt_asset:              opp.debt_asset,
+                        debt_asset_symbol:       opp.debt_symbol.clone(),
+                        collateral_asset:        opp.collateral_asset,
+                        collateral_asset_symbol: opp.collateral_symbol.clone(),
+                        estimated_profit_eth:    opp.gross_profit_wei as f64 / 1e18,
+                        gas_cost_eth:            opp.estimated_gas_wei as f64 / 1e18,
+                        shortfall_eth:           shortfall_wei as f64 / 1e18,
+                        chain:                   chain.name.to_string(),
+                        timestamp:               Utc::now().timestamp(),
+                    };
+                    if let Err(e) = db.lock().unwrap().insert_skipped(&skipped) {
+                        warn!("Failed to log skipped opportunity: {e}");
+                    }
+                    // Queue as batch candidate
+                    batch_candidates.push(opp);
+                }
+                Ok(RankResult::Ineligible) => {
+                    // No valid position (no collateral/debt or zero prices)
                 }
                 Err(e) => {
                     warn!(borrower = ?account.address, "Opportunity finder error: {e}");
+                }
+            }
+        }
+
+        // ── Batch pass ────────────────────────────────────────────────────────
+        // Group individually-unprofitable positions by debt asset and attempt
+        // a batch liquidation if the collective profit covers batch gas overhead.
+        if batch_candidates.len() >= 2 {
+            let batches = opportunity_ranker
+                .find_batch_candidates(&batch_candidates, &params)
+                .await;
+
+            for batch in &batches {
+                info!(
+                    debt_asset = ?batch.debt_asset,
+                    positions  = batch.positions.len(),
+                    gross_profit_eth = batch.total_gross_profit_wei as f64 / 1e18,
+                    gas_eth          = batch.total_estimated_gas_wei as f64 / 1e18,
+                    "Batch liquidation opportunity found"
+                );
+
+                let result = tx_submitter.execute_batch(batch, &db, &params).await;
+
+                if result.success {
+                    if args.shadow {
+                        info!(profit_eth = result.profit_eth, positions = batch.positions.len(), "[SHADOW] Batch would have earned");
+                    } else {
+                        info!(
+                            tx_hash    = result.tx_hash,
+                            profit_eth = result.profit_eth,
+                            positions  = batch.positions.len(),
+                            "Batch liquidation SUCCESS"
+                        );
+                    }
                 }
             }
         }

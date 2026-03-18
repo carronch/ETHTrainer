@@ -9,7 +9,7 @@
 
 use crate::config::HeuristicParams;
 use crate::db::Db;
-use crate::types::{LiquidationOpportunity, LiquidationResult};
+use crate::types::{BatchLiquidationOpportunity, LiquidationOpportunity, LiquidationResult};
 use std::sync::Mutex;
 use alloy::{
     network::TransactionBuilder,
@@ -34,6 +34,19 @@ sol! {
             uint256 debtToCover,
             uint24 uniswapPoolFee,
             uint256 minProfitWei
+        ) external;
+
+        struct BatchPositionParams {
+            address collateralAsset;
+            address userToLiquidate;
+            uint256 debtToCover;
+            uint24  uniswapPoolFee;
+        }
+
+        function batchLiquidate(
+            address debtAsset,
+            BatchPositionParams[] calldata positions,
+            uint256 minTotalProfitWei
         ) external;
     }
 }
@@ -252,6 +265,162 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
         }
     }
 
+    /// Execute a batch liquidation via `batchLiquidate()`.
+    /// Logs each individual position as a trade row after the batch succeeds.
+    pub async fn execute_batch(
+        &self,
+        batch: &BatchLiquidationOpportunity,
+        db: &Arc<Mutex<Db>>,
+        params: &HeuristicParams,
+    ) -> LiquidationResult {
+        // ── Circuit breaker ────────────────────────────────────────────────────
+        if self.circuit_breaker.lock().unwrap().is_paused() {
+            let borrowers: Vec<_> = batch.positions.iter().map(|p| p.borrower).collect();
+            return LiquidationResult {
+                success: false,
+                tx_hash: None,
+                profit_eth: None,
+                error: Some("Circuit breaker active".to_string()),
+                borrower: borrowers[0],
+                collateral_symbol: batch.positions[0].collateral_symbol.clone(),
+                debt_symbol: batch.debt_asset_symbol.clone(),
+                was_shadow: self.shadow_mode,
+            };
+        }
+
+        // ── Gas price check ────────────────────────────────────────────────────
+        let gas_price = match self.provider.get_gas_price().await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Batch: failed to get gas price: {e}");
+                return self.fail_batch_result(batch, "gas price fetch failed");
+            }
+        };
+        if gas_price as f64 > params.max_gas_gwei * 1e9 {
+            return self.fail_batch_result(batch, "gas exceeds limit");
+        }
+
+        // Build positions calldata
+        let bot = ILiquidationBot::new(self.bot_address, self.provider.clone());
+        let positions: Vec<ILiquidationBot::BatchPositionParams> = batch
+            .positions
+            .iter()
+            .map(|p| ILiquidationBot::BatchPositionParams {
+                collateralAsset:  p.collateral_asset,
+                userToLiquidate:  p.borrower,
+                debtToCover:      U256::from(p.debt_to_cover),
+                uniswapPoolFee:   alloy::primitives::Uint::<24, 1>::from(p.uniswap_pool_fee as u16),
+            })
+            .collect();
+
+        let call = bot.batchLiquidate(
+            batch.debt_asset,
+            positions,
+            U256::from(batch.min_total_profit_wei),
+        );
+
+        // ── Pre-flight eth_call simulation ─────────────────────────────────────
+        if let Err(e) = call.call().await {
+            info!(
+                debt_asset = ?batch.debt_asset,
+                positions = batch.positions.len(),
+                "Batch eth_call simulation failed: {e}"
+            );
+            return self.fail_batch_result(batch, &format!("simulation failed: {e}"));
+        }
+
+        // ── Shadow mode ────────────────────────────────────────────────────────
+        if self.shadow_mode {
+            let profit_eth = (batch.total_gross_profit_wei - batch.total_estimated_gas_wei) as f64 / 1e18;
+            info!(
+                debt_asset = ?batch.debt_asset,
+                positions = batch.positions.len(),
+                profit_eth,
+                "[SHADOW] Would have submitted batch liquidation"
+            );
+            return LiquidationResult {
+                success: true,
+                tx_hash: None,
+                profit_eth: Some(profit_eth),
+                error: None,
+                borrower: batch.positions[0].borrower,
+                collateral_symbol: batch.positions[0].collateral_symbol.clone(),
+                debt_symbol: batch.debt_asset_symbol.clone(),
+                was_shadow: true,
+            };
+        }
+
+        // ── Live: log pending rows for each position ───────────────────────────
+        let row_ids: Vec<i64> = batch.positions.iter().map(|p| {
+            db.lock().unwrap()
+                .insert_trade_pending(
+                    &p.borrower.to_string(),
+                    &p.collateral_symbol,
+                    &batch.debt_asset_symbol,
+                    p.gross_profit_wei as f64 / 1e18,
+                    false,
+                )
+                .unwrap_or(0)
+        }).collect();
+
+        // Estimate batch gas: base + N * per-position
+        let batch_gas_limit = 300_000u64 + 650_000u64 * batch.positions.len() as u64;
+        let tx = call.gas(batch_gas_limit).gas_price(gas_price);
+
+        match tx.send().await {
+            Ok(pending) => {
+                let tx_hash = pending.tx_hash().to_string();
+                info!(tx_hash, positions = batch.positions.len(), "Batch tx submitted, waiting for receipt");
+
+                match pending.get_receipt().await {
+                    Ok(receipt) if receipt.status() => {
+                        let profit_eth = (batch.total_gross_profit_wei - batch.total_estimated_gas_wei) as f64 / 1e18;
+                        let gas_used = receipt.gas_used;
+                        for row_id in &row_ids {
+                            let _ = db.lock().unwrap().confirm_trade(*row_id, &tx_hash, "confirmed", Some(profit_eth / row_ids.len() as f64), Some(gas_used / row_ids.len() as u64), Some(gas_price));
+                        }
+                        self.circuit_breaker.lock().unwrap().record_success();
+                        info!(tx_hash, profit_eth, positions = batch.positions.len(), "Batch liquidation confirmed!");
+                        LiquidationResult {
+                            success: true,
+                            tx_hash: Some(tx_hash),
+                            profit_eth: Some(profit_eth),
+                            error: None,
+                            borrower: batch.positions[0].borrower,
+                            collateral_symbol: batch.positions[0].collateral_symbol.clone(),
+                            debt_symbol: batch.debt_asset_symbol.clone(),
+                            was_shadow: false,
+                        }
+                    }
+                    Ok(receipt) => {
+                        let gas_used = receipt.gas_used;
+                        for row_id in &row_ids {
+                            let _ = db.lock().unwrap().confirm_trade(*row_id, &tx_hash, "failed", None, Some(gas_used), Some(gas_price));
+                        }
+                        self.circuit_breaker.lock().unwrap().record_failure(params.circuit_breaker_failures, params.circuit_breaker_pause_secs);
+                        warn!(tx_hash, "Batch tx reverted");
+                        self.fail_batch_result(batch, "batch tx reverted")
+                    }
+                    Err(e) => {
+                        for row_id in &row_ids {
+                            let _ = db.lock().unwrap().confirm_trade(*row_id, &tx_hash, "failed", None, None, None);
+                        }
+                        self.circuit_breaker.lock().unwrap().record_failure(params.circuit_breaker_failures, params.circuit_breaker_pause_secs);
+                        self.fail_batch_result(batch, &format!("receipt error: {e}"))
+                    }
+                }
+            }
+            Err(e) => {
+                for row_id in &row_ids {
+                    let _ = db.lock().unwrap().confirm_trade(*row_id, "", "failed", None, None, None);
+                }
+                self.circuit_breaker.lock().unwrap().record_failure(params.circuit_breaker_failures, params.circuit_breaker_pause_secs);
+                error!(positions = batch.positions.len(), "Batch tx submission failed: {e}");
+                self.fail_batch_result(batch, &format!("submission error: {e}"))
+            }
+        }
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     fn fail_result(&self, opp: &LiquidationOpportunity, msg: &str) -> LiquidationResult {
@@ -263,6 +432,19 @@ impl<P: Provider + WalletProvider> TxSubmitter<P> {
             borrower: opp.borrower,
             collateral_symbol: opp.collateral_symbol.clone(),
             debt_symbol: opp.debt_symbol.clone(),
+            was_shadow: self.shadow_mode,
+        }
+    }
+
+    fn fail_batch_result(&self, batch: &BatchLiquidationOpportunity, msg: &str) -> LiquidationResult {
+        LiquidationResult {
+            success: false,
+            tx_hash: None,
+            profit_eth: None,
+            error: Some(msg.to_string()),
+            borrower: batch.positions[0].borrower,
+            collateral_symbol: batch.positions[0].collateral_symbol.clone(),
+            debt_symbol: batch.debt_asset_symbol.clone(),
             was_shadow: self.shadow_mode,
         }
     }
