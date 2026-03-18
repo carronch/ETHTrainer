@@ -97,6 +97,19 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 - Base watchlist seeded historically (55,164 addresses) — higher liquidation opportunity density than Arbitrum.
 - Kernel upgraded on Hetzner (6.8.0-106) — reboot complete 2026-03-16.
 
+### Batch Liquidation — Deployed 2026-03-18
+- [x] `skipped_opportunities` table — logs every position below single-tx profitability threshold
+- [x] `LiquidationBot.sol` — `batchLiquidate()` added (opType prefix byte dispatches single vs batch)
+- [x] Rust batch executor — `find_batch_candidates()` + `execute_batch()` in Rust hot path
+- [x] Contracts redeployed on all 3 chains with new ABI:
+  - Arbitrum: `0x8D7EDd5fa9094Cdc295A2F9292970cE2c8F54093`
+  - Base: `0x9465Ed4A0920BBA1D8eFD4B1b605f9e60d6796ac`
+  - Optimism: `0xdd735eDAD018357825c164a5A81aFAeeC2f1Fd0D`
+- [x] Monitor fixed: checks `liquidator-arbitrum/base/optimism` (was checking wrong service name)
+- [ ] **Decision point (48-72h):** query `skipped_opportunities` — if avg_profit > 0.000001 ETH and
+  10+ skips/day cluster on one debt asset → batch is worth running. Current data (2026-03-18):
+  mostly zero-profit zombie positions on Optimism, not batch candidates.
+
 ---
 
 ## 🟢 Phase 2 — Autoresearch Online
@@ -112,7 +125,7 @@ Communication: Rust ↔ TS via SQLite + `heuristic_params.json` file.
 - [ ] Add Radiant Capital (Parked — recent $50M exploit, TVL too low)
 - [ ] Add The Graph complete borrower coverage (all current borrowers, not just recent events)
 - [x] Aave v3 Base — live 2026-03-16
-- [x] Aave v3 Optimism — live 2026-03-16, contract: 0xE108aCF99820554f0A577d8aa164e84cf08f2125, watchlist=4375
+- [x] Aave v3 Optimism — live 2026-03-16, watchlist=4375
 
 ---
 

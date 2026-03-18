@@ -106,3 +106,18 @@ Purpose: prevent the same mistake from happening twice.
 **What happened:** Instructed user to change `--shadow` to `--live` in systemd service. Binary rejected `--live` as unknown argument, causing a crash loop.
 **Root cause:** Assumed symmetrical flags (`--shadow` / `--live`). The actual CLI only has `--shadow` (boolean flag). Without it, the binary runs in live mode by default.
 **Rule:** To go live: remove `--shadow` from ExecStart. Do NOT add `--live`. Correct ExecStart: `liquidator --chain arbitrum` (no shadow flag). Always check `liquidator --help` before writing CLI args.
+
+### deploy-liquidation-bot.ts reads NETWORK env var, not --chain flag
+**What happened:** Ran `npx tsx scripts/deploy-liquidation-bot.ts --chain base` — all 3 deploys landed on Arbitrum and overwrote the same `LIQUIDATION_BOT_ADDRESS` key.
+**Root cause:** Script reads `process.env['NETWORK']`, ignores argv. The `--chain` argument is silently ignored.
+**Rule:** Always use `NETWORK=<chain> npx tsx scripts/deploy-liquidation-bot.ts`. Never pass `--chain`. Each chain auto-updates its own env key: `LIQUIDATION_BOT_ADDRESS` (arbitrum), `LIQUIDATION_BOT_ADDRESS_BASE`, `LIQUIDATION_BOT_ADDRESS_OPTIMISM`.
+
+### LiquidationBot.sol opType prefix — contract must be redeployed when params encoding changes
+**What happened:** New binary (with opType prefix byte) was deployed before new contracts. Old on-chain contracts couldn't decode the new params, causing all liquidations to fail silently at eth_call simulation.
+**Root cause:** The `liquidate()` params encoding changed (added `abi.encodePacked(uint8(0), ...)` prefix). Old contracts expected raw `abi.encode(LiquidationParams)`.
+**Rule:** Any time the flash loan params encoding changes in the contract, redeploy ALL chain contracts before restarting the Rust services. Sequence: compile → deploy → update .dev.vars → restart services.
+
+### Monitor service names must match actual systemd service names
+**What happened:** Monitor checked `systemctl is-active liquidator` but services are named `liquidator-arbitrum`, `liquidator-base`, `liquidator-optimism`. Crash alerts never fired.
+**Root cause:** Monitor was written before multi-chain support added the chain suffix to service names.
+**Rule:** When adding a new chain/service, update `LIQUIDATOR_SERVICES` array in `src/monitor/index.ts` to include the new service name.
