@@ -48,6 +48,9 @@ pub struct ChainConfig {
 
     /// Lowercase WETH and WBTC addresses (use 0.05% Uniswap pool fee).
     pub major_tokens: &'static [&'static str],
+
+    /// WETH address on this chain — used by OpportunityRanker to look up live ETH/USD from oracle.
+    pub weth_address: &'static str,
 }
 
 // ── Chain presets ─────────────────────────────────────────────────────────────
@@ -73,6 +76,7 @@ pub const ARBITRUM: ChainConfig = ChainConfig {
         "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
         "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
     ],
+    weth_address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
 };
 
 pub const OPTIMISM: ChainConfig = ChainConfig {
@@ -96,6 +100,7 @@ pub const OPTIMISM: ChainConfig = ChainConfig {
         "0x4200000000000000000000000000000000000006", // WETH (OP Stack canonical)
         "0x68f180fcce6836688e9084f035309e29bf0a2095", // WBTC
     ],
+    weth_address: "0x4200000000000000000000000000000000000006",
 };
 
 pub const BASE: ChainConfig = ChainConfig {
@@ -118,6 +123,7 @@ pub const BASE: ChainConfig = ChainConfig {
         "0x4200000000000000000000000000000000000006", // WETH (OP Stack canonical)
         "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
     ],
+    weth_address: "0x4200000000000000000000000000000000000006",
 };
 
 // ── Lookup ────────────────────────────────────────────────────────────────────
@@ -131,5 +137,52 @@ pub fn get_chain(name: &str) -> Result<&'static ChainConfig> {
             "Unknown chain '{}'. Supported: arbitrum, optimism, base",
             other
         )),
+    }
+}
+
+impl ChainConfig {
+    /// Returns a map of lowercase token address → ticker symbol for well-known
+    /// Aave v3 reserves on this chain. Used by OpportunityRanker to produce
+    /// human-readable symbols in logs, trades table, and Telegram alerts.
+    pub fn token_symbols(&self) -> std::collections::HashMap<String, &'static str> {
+        let pairs: &[(&str, &str)] = match self.name {
+            "arbitrum" => &[
+                ("0xaf88d065e77c8cc2239327c5edb3a432268e5831", "USDC"),
+                ("0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", "USDC.e"),
+                ("0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "USDT"),
+                ("0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", "DAI"),
+                ("0x82af49447d8a07e3bd95bd0d56f35241523fbab1", "WETH"),
+                ("0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", "WBTC"),
+                ("0x5979d7b546e38e414f7e9822514be443a4800529", "wstETH"),
+                ("0x35751007a407ca6feffe80b3cb397736d2cf4dbe", "weETH"),
+                ("0x912ce59144191c1204e64559fe8253a0e49e6548", "ARB"),
+                ("0xec70dcb4a1efa46b8f2d97c310c9c4790ba5ffa8", "rETH"),
+                ("0xf97f4df75117a78c1a5a0dbb814af92458539fb4", "LINK"),
+            ],
+            "base" => &[
+                ("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "USDC"),
+                ("0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca", "USDbC"),
+                ("0x50c5725949a6f0c72e6c4a641f24049a917db0cb", "DAI"),
+                ("0x4200000000000000000000000000000000000006", "WETH"),
+                ("0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", "cbBTC"),
+                ("0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22", "cbETH"),
+                ("0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452", "wstETH"),
+                ("0x04c0599ae5a44757c0af6f9ec3b93da8976c150a", "weETH"),
+            ],
+            "optimism" => &[
+                ("0x0b2c639c533813f4aa9d7837caf62653d097ff85", "USDC"),
+                ("0x7f5c764cbc14f9669b88837ca1490cca17c31607", "USDC.e"),
+                ("0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", "USDT"),
+                ("0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", "DAI"),
+                ("0x4200000000000000000000000000000000000006", "WETH"),
+                ("0x68f180fcce6836688e9084f035309e29bf0a2095", "WBTC"),
+                ("0x1f32b1c2345538c0c6f582fcb022739c4a194ebb", "wstETH"),
+                ("0x9bcef72be871e61ed4fbbc7630889bee758eb81d", "rETH"),
+                ("0x350a791bfc2c21f9ed5d10980dad2e2638ffa7f6", "LINK"),
+                ("0x4200000000000000000000000000000000000042", "OP"),
+            ],
+            _ => &[],
+        };
+        pairs.iter().map(|&(addr, sym)| (addr.to_string(), sym)).collect()
     }
 }

@@ -69,48 +69,47 @@ impl MissedTracker {
                                         let event = decoded.data();
                                         let borrower = event.user;
 
-                                        // Single-row DB lookup — no full list load
+                                        // Check if this borrower is on our watchlist
                                         let is_watched = db.lock()
                                             .ok()
                                             .and_then(|g| g.is_borrower_watched(&borrower.to_string()).ok())
                                             .unwrap_or(false);
 
-                                        if is_watched {
-                                            // Fetch winner's gas price from the transaction
-                                            let winner_gas_gwei = if let Some(tx_hash) = log.transaction_hash {
-                                                match provider.get_transaction_by_hash(tx_hash).await {
-                                                    Ok(Some(tx)) => tx.effective_gas_price
-                                                        .map(|p| p as f64 / 1e9)
-                                                        .unwrap_or(0.0),
-                                                    _ => 0.0,
-                                                }
+                                        // Fetch winner's gas price from the transaction
+                                        let winner_gas_gwei = if let Some(tx_hash) = log.transaction_hash {
+                                            match provider.get_transaction_by_hash(tx_hash).await {
+                                                Ok(Some(tx)) => tx.effective_gas_price
+                                                    .map(|p| p as f64 / 1e9)
+                                                    .unwrap_or(0.0),
+                                                _ => 0.0,
+                                            }
+                                        } else {
+                                            0.0
+                                        };
+
+                                        let missed = MissedOpportunity {
+                                            borrower,
+                                            collateral_asset: event.collateralAsset,
+                                            debt_asset: event.debtAsset,
+                                            profit_missed_eth: 0.0, // calculated by autoresearch Anvil sim
+                                            winner_address: event.liquidator,
+                                            winner_gas_gwei,
+                                            block_number: log.block_number.unwrap_or(0),
+                                            timestamp: Utc::now().timestamp(),
+                                        };
+
+                                        if let Ok(db_lock) = db.lock() {
+                                            if let Err(e) = db_lock.insert_missed_opportunity(&missed, is_watched) {
+                                                warn!("Failed to log missed opportunity: {e}");
                                             } else {
-                                                0.0
-                                            };
-
-                                            let missed = MissedOpportunity {
-                                                borrower,
-                                                collateral_asset: event.collateralAsset,
-                                                debt_asset: event.debtAsset,
-                                                profit_missed_eth: 0.0, // calculated by autoresearch Anvil sim
-                                                winner_address: event.liquidator,
-                                                winner_gas_gwei,
-                                                block_number: log.block_number.unwrap_or(0),
-                                                timestamp: Utc::now().timestamp(),
-                                            };
-
-                                            if let Ok(db_lock) = db.lock() {
-                                                if let Err(e) = db_lock.insert_missed_opportunity(&missed) {
-                                                    warn!("Failed to log missed opportunity: {e}");
-                                                } else {
-                                                    info!(
-                                                        borrower = ?borrower,
-                                                        winner = ?event.liquidator,
-                                                        winner_gas_gwei,
-                                                        block = log.block_number,
-                                                        "Missed liquidation logged"
-                                                    );
-                                                }
+                                                info!(
+                                                    borrower     = ?borrower,
+                                                    winner       = ?event.liquidator,
+                                                    winner_gas_gwei,
+                                                    was_watched  = is_watched,
+                                                    block        = log.block_number,
+                                                    "Liquidation event logged"
+                                                );
                                             }
                                         }
                                     }

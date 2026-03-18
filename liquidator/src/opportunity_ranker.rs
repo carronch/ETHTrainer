@@ -15,7 +15,7 @@ use alloy::{
     sol,
 };
 use anyhow::Result;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::debug;
 
 sol! {
@@ -69,8 +69,12 @@ pub struct OpportunityRanker<P: Provider> {
     stable_tokens: Vec<String>,
     /// Per-chain major token addresses: WETH, WBTC (use 0.05% fee tier).
     major_tokens: Vec<String>,
-    /// Cached reserves list (refreshed on start and periodically)
-    reserves_cache: tokio::sync::RwLock<Option<Vec<Address>>>,
+    /// Cached reserves list + fetch timestamp for TTL-based refresh.
+    reserves_cache: tokio::sync::RwLock<Option<(Vec<Address>, Instant)>>,
+    /// WETH address on this chain (used to look up live ETH price from oracle).
+    weth_address: Address,
+    /// Per-chain token symbol map (lowercase address -> ticker).
+    symbols: HashMap<String, &'static str>,
 }
 
 impl<P: Provider> OpportunityRanker<P> {
@@ -81,6 +85,8 @@ impl<P: Provider> OpportunityRanker<P> {
         oracle: &str,
         stable_tokens: &[&str],
         major_tokens: &[&str],
+        weth_address: &str,
+        symbols: HashMap<String, &'static str>,
     ) -> Result<Self> {
         Ok(Self {
             provider,
@@ -90,6 +96,8 @@ impl<P: Provider> OpportunityRanker<P> {
             stable_tokens: stable_tokens.iter().map(|s| s.to_string()).collect(),
             major_tokens: major_tokens.iter().map(|s| s.to_string()).collect(),
             reserves_cache: tokio::sync::RwLock::new(None),
+            weth_address: weth_address.parse()?,
+            symbols,
         })
     }
 
@@ -153,22 +161,33 @@ impl<P: Provider> OpportunityRanker<P> {
         // Flash loan fee (0.09%)
         let flash_loan_fee = debt_to_cover.saturating_mul(FLASH_LOAN_FEE_BPS) / 10_000;
 
-        // Gross profit in debt token units
+        // Collateral value expressed in debt-token units (for apples-to-apples profit math)
         let collateral_value_in_debt = collateral_received
             .saturating_mul(collateral_price)
             / debt_price;
+
+        // Uniswap swap fee on the collateral→debt swap; pool_fee is in 1/1_000_000 units.
+        let pool_fee = self.preferred_fee(&best_collateral.asset, &best_debt.asset);
+        let uniswap_fee = collateral_value_in_debt
+            .saturating_mul(pool_fee as u128)
+            / 1_000_000;
+
+        // Gross profit in debt token units (after all fees)
         let gross_profit_debt_units = collateral_value_in_debt
             .saturating_sub(debt_to_cover)
-            .saturating_sub(flash_loan_fee);
+            .saturating_sub(flash_loan_fee)
+            .saturating_sub(uniswap_fee);
 
-        // Convert profit to ETH equivalent
-        // profit_usd (8 dec) → profit_eth via approx ETH = $3000
+        // Convert profit to USD (8-decimal oracle prices), then to ETH via live WETH oracle price.
+        // Fallback to $2,000 (conservative) if WETH is somehow missing from oracle.
         let profit_usd = gross_profit_debt_units
             .saturating_mul(debt_price)
             / 10u128.pow(best_debt.decimals as u32);
 
-        // ETH price approximation: $3000 with 8 decimal oracle
-        let eth_price_usd_8dec = 3_000_00000000u128;
+        let eth_price_usd_8dec = prices.get(&self.weth_address)
+            .copied()
+            .filter(|&p| p > 0)
+            .unwrap_or(2_000_00000000u128); // $2,000 fallback with 8 decimals
         let profit_wei = profit_usd
             .saturating_mul(1_000_000_000_000_000_000) // 1e18
             / eth_price_usd_8dec;
@@ -176,8 +195,6 @@ impl<P: Provider> OpportunityRanker<P> {
         // Gas cost
         let gas_price = self.provider.get_gas_price().await?;
         let gas_cost_wei = params.gas_estimate_liquidation as u128 * gas_price;
-
-        let pool_fee = self.preferred_fee(&best_collateral.asset, &best_debt.asset);
 
         // Below gas cost — candidate for batching
         if profit_wei <= gas_cost_wei {
@@ -336,16 +353,19 @@ impl<P: Provider> OpportunityRanker<P> {
     }
 
     async fn get_reserves(&self) -> Result<Vec<Address>> {
+        const CACHE_TTL_SECS: u64 = 6 * 3600; // refresh every 6 hours
         {
             let cache = self.reserves_cache.read().await;
-            if let Some(ref list) = *cache {
-                return Ok(list.clone());
+            if let Some((ref list, fetched_at)) = *cache {
+                if fetched_at.elapsed().as_secs() < CACHE_TTL_SECS {
+                    return Ok(list.clone());
+                }
             }
         }
         let pool = IAavePool::new(self.pool, self.provider.clone());
         let list = pool.getReservesList().call().await?;
         let mut cache = self.reserves_cache.write().await;
-        *cache = Some(list.clone());
+        *cache = Some((list.clone(), Instant::now()));
         Ok(list)
     }
 
@@ -404,7 +424,10 @@ impl<P: Provider> OpportunityRanker<P> {
 
             out.push(UserReserveData {
                 asset:              reserves[i],
-                symbol:             reserves[i].to_string()[..8].to_string(), // short placeholder
+                symbol:             self.symbols
+                    .get(&reserves[i].to_string().to_lowercase())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("…{}", &reserves[i].to_string()[36..])),
                 decimals:           cr.decimals.to::<u8>(),
                 a_token_balance:    a_token,
                 stable_debt:        stable,

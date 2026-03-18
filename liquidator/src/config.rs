@@ -47,11 +47,11 @@ pub struct HeuristicParams {
 impl Default for HeuristicParams {
     fn default() -> Self {
         Self {
-            max_gas_gwei: 1.0,
-            min_profit_eth: 0.005,
+            max_gas_gwei: 2.0,           // raised: Arbitrum can spike above 1.0
+            min_profit_eth: 0.002,        // lowered: 0.005 was missing small but real opps
             hf_alert_threshold: 1.08,
-            scan_interval_ms: 12_000,
-            scan_batch_size: 50,
+            scan_interval_ms: 3_000,      // 3s instead of 12s — ~12 blocks per scan on Arbitrum
+            scan_batch_size: 200,         // 4× throughput; 55k-address lists now scan in ~2min
             gas_estimate_liquidation: 900_000,
             circuit_breaker_failures: 3,
             circuit_breaker_pause_secs: 3600,

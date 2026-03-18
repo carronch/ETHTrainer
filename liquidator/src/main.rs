@@ -168,6 +168,8 @@ async fn main() -> Result<()> {
         chain.aave_oracle,
         chain.stable_tokens,
         chain.major_tokens,
+        chain.weth_address,
+        chain.token_symbols(),
     )?;
     let tx_submitter   = tx_submitter::TxSubmitter::new(provider.clone(), bot_address, pool_address, args.shadow);
     let event_listener = event_listener::EventListener::new(chain.aave_pool, chain.history_blocks)?;

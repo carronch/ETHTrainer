@@ -64,7 +64,8 @@ impl Db {
             block_number      INTEGER NOT NULL,
             timestamp         INTEGER NOT NULL DEFAULT (unixepoch()),
             chain             TEXT NOT NULL DEFAULT 'arbitrum',
-            analyzed          INTEGER NOT NULL DEFAULT 0
+            analyzed          INTEGER NOT NULL DEFAULT 0,
+            was_watched       INTEGER NOT NULL DEFAULT 0  -- 1 = was on our watchlist, 0 = never seen before
         );
         CREATE TABLE IF NOT EXISTS skipped_opportunities (
             id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,12 +165,13 @@ impl Db {
                  total_collateral_usd = ?2,
                  total_debt_usd       = ?3,
                  updated_at           = unixepoch()
-             WHERE address = ?4",
+             WHERE address = ?4 AND network = ?5",
             params![
                 health_factor.to_string(),
                 collateral_usd,
                 debt_usd,
                 address.to_lowercase(),
+                self.chain,
             ],
         )?;
         Ok(())
@@ -238,12 +240,12 @@ impl Db {
     // ── Missed opportunity logging ────────────────────────────────────────────
     // These are critical for the autoresearch loop.
 
-    pub fn insert_missed_opportunity(&self, opp: &MissedOpportunity) -> Result<()> {
+    pub fn insert_missed_opportunity(&self, opp: &MissedOpportunity, was_watched: bool) -> Result<()> {
         self.conn.execute(
             "INSERT INTO missed_opportunities
              (borrower, collateral_asset, debt_asset, profit_missed_eth,
-              winner_address, winner_gas_gwei, block_number, timestamp, chain)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              winner_address, winner_gas_gwei, block_number, timestamp, chain, was_watched)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 opp.borrower.to_string().to_lowercase(),
                 opp.collateral_asset.to_string().to_lowercase(),
@@ -254,6 +256,7 @@ impl Db {
                 opp.block_number,
                 opp.timestamp,
                 self.chain,
+                was_watched as i32,
             ],
         )?;
         Ok(())
