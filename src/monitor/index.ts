@@ -79,23 +79,26 @@ async function runHealthCheck(): Promise<void> {
   await checkNoWinAlert()
 }
 
-async function checkRustProcess(): Promise<void> {
-  try {
-    // Rust liquidator runs via systemd on Hetzner (not pm2)
-    const { stdout } = await execAsync('systemctl is-active liquidator')
-    const status = stdout.trim()
+const LIQUIDATOR_SERVICES = ['liquidator-arbitrum', 'liquidator-base', 'liquidator-optimism']
 
-    if (status !== 'active') {
-      await alertError(`Rust liquidator systemd service is ${status}. Attempting restart.`)
-      try {
-        await execAsync('systemctl restart liquidator')
-        await alertInfo('Liquidator service restarted via systemctl')
-      } catch (restartErr) {
-        await alertError(`Failed to restart liquidator: ${restartErr}`)
+async function checkRustProcess(): Promise<void> {
+  for (const service of LIQUIDATOR_SERVICES) {
+    try {
+      const { stdout } = await execAsync(`systemctl is-active ${service}`)
+      const status = stdout.trim()
+
+      if (status !== 'active') {
+        await alertError(`${service} is ${status}. Attempting restart.`)
+        try {
+          await execAsync(`systemctl restart ${service}`)
+          await alertInfo(`${service} restarted via systemctl`)
+        } catch (restartErr) {
+          await alertError(`Failed to restart ${service}: ${restartErr}`)
+        }
       }
+    } catch {
+      // systemctl not available (dev environment) — skip silently
     }
-  } catch {
-    // systemctl not available (dev environment) — skip silently
   }
 }
 
