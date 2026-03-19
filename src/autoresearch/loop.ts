@@ -45,7 +45,7 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
 
   console.log('[Autoresearch] Starting nightly cycle:', startedAt)
 
-  const currentParams = loadParams()
+  const currentParams = loadParams(chain)
   let missedOppsAnalyzed = 0
   let simulationsRun = 0
 
@@ -125,7 +125,7 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
       // ── Step 5: Apply if improvement found ────────────────────────────────────
 
       if (validation.should_apply) {
-        writeParams(proposedParams)
+        writeParams(proposedParams, chain)
         applied = true
 
         // Log to SQLite history

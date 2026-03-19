@@ -124,10 +124,13 @@ impl Db {
         let hf_low  = (0.90 * 1e18) as i64;
         let hf_high = (hf_hot_threshold * 1e18) as i64;
         let mut stmt = self.conn.prepare(
+            // Exclude dust positions (total_debt_usd < $10) — these inflate the hot zone
+            // but will never be profitable to liquidate after gas costs.
             "SELECT address FROM liquidation_watchlist
              WHERE network = ? AND is_active = 1
                AND last_health_factor IS NOT NULL
                AND CAST(last_health_factor AS INTEGER) BETWEEN ? AND ?
+               AND (total_debt_usd IS NULL OR total_debt_usd >= 10.0)
              ORDER BY CAST(last_health_factor AS REAL) ASC
              LIMIT ?",
         )?;

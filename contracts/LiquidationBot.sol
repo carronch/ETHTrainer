@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IAavePool, IFlashLoanSimpleReceiver} from "./interfaces/IAavePool.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 
@@ -16,7 +17,7 @@ import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 ///      Flash loan params are prefixed with a 1-byte opType to route to the correct handler:
 ///        0x00 = single liquidation
 ///        0x01 = batch liquidation
-contract LiquidationBot is IFlashLoanSimpleReceiver {
+contract LiquidationBot is IFlashLoanSimpleReceiver, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public immutable owner;
@@ -161,7 +162,7 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
         uint256 premium,
         address initiator,
         bytes calldata params
-    ) external override returns (bool) {
+    ) external override nonReentrant returns (bool) {
         // Security: only Aave Pool can call; only this contract can initiate
         if (msg.sender != pool)          revert NotPool();
         if (initiator != address(this))  revert NotSelf();
@@ -283,9 +284,9 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
         }
 
         // 2. Swap each collateral type back to the debt asset.
-        //    amountOutMinimum: 0 per-swap — the aggregate profit check below is the guard.
-        //    (Setting per-swap minimums would prevent the batching benefit for individually
-        //     sub-threshold positions.)
+        //    amountOutMinimum = debtToCover for that position: each swap must recoup at
+        //    minimum the debt used, so no individual position can be a net loss.
+        //    Profit from the liquidation bonus is collected by the aggregate check below.
         for (uint256 i = 0; i < positions.length; i++) {
             if (collaterals[i] == debtAsset || collateralAmounts[i] == 0) continue;
             IERC20(collaterals[i]).forceApprove(router, collateralAmounts[i]);
@@ -296,7 +297,7 @@ contract LiquidationBot is IFlashLoanSimpleReceiver {
                     fee:               positions[i].uniswapPoolFee,
                     recipient:         address(this),
                     amountIn:          collateralAmounts[i],
-                    amountOutMinimum:  0,
+                    amountOutMinimum:  positions[i].debtToCover,
                     sqrtPriceLimitX96: 0
                 })
             );

@@ -15,18 +15,60 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { getDb } from '../db/index.js'
 import type { HeuristicParams, SimulationResult } from './types.js'
 
-const PARAMS_FILE = 'heuristic_params.json'
+function paramsFile(chain: string): string {
+  return `heuristic_params.${chain}.json`
+}
 
-export function loadParams(): HeuristicParams {
+export function loadParams(chain = 'arbitrum'): HeuristicParams {
   try {
-    return JSON.parse(readFileSync(PARAMS_FILE, 'utf8')) as HeuristicParams
+    return JSON.parse(readFileSync(paramsFile(chain), 'utf8')) as HeuristicParams
   } catch {
     return defaultParams()
   }
 }
 
-export function writeParams(params: HeuristicParams): void {
-  writeFileSync(PARAMS_FILE, JSON.stringify(params, null, 2), 'utf8')
+export function writeParams(params: HeuristicParams, chain = 'arbitrum'): void {
+  writeFileSync(paramsFile(chain), JSON.stringify(params, null, 2), 'utf8')
+}
+
+// ── Parameter validation ───────────────────────────────────────────────────────
+
+/**
+ * Validate LLM-proposed params against safe operating bounds.
+ * Throws if any field is missing or wildly out of range.
+ * This is a hard guard against LLM hallucination (e.g. max_gas_gwei: 10000).
+ */
+function validateParams(p: HeuristicParams): void {
+  const errors: string[] = []
+
+  if (typeof p.max_gas_gwei !== 'number' || p.max_gas_gwei < 0.1 || p.max_gas_gwei > 50) {
+    errors.push(`max_gas_gwei=${p.max_gas_gwei} out of range [0.1, 50]`)
+  }
+  if (typeof p.min_profit_eth !== 'number' || p.min_profit_eth < 0.00001 || p.min_profit_eth > 1.0) {
+    errors.push(`min_profit_eth=${p.min_profit_eth} out of range [0.00001, 1.0]`)
+  }
+  if (typeof p.hf_alert_threshold !== 'number' || p.hf_alert_threshold < 1.0 || p.hf_alert_threshold > 2.0) {
+    errors.push(`hf_alert_threshold=${p.hf_alert_threshold} out of range [1.0, 2.0]`)
+  }
+  if (typeof p.scan_interval_ms !== 'number' || p.scan_interval_ms < 1000 || p.scan_interval_ms > 300_000) {
+    errors.push(`scan_interval_ms=${p.scan_interval_ms} out of range [1000, 300000]`)
+  }
+  if (typeof p.scan_batch_size !== 'number' || p.scan_batch_size < 50 || p.scan_batch_size > 1000) {
+    errors.push(`scan_batch_size=${p.scan_batch_size} out of range [50, 1000]`)
+  }
+  if (typeof p.gas_estimate_liquidation !== 'number' || p.gas_estimate_liquidation < 300_000 || p.gas_estimate_liquidation > 3_000_000) {
+    errors.push(`gas_estimate_liquidation=${p.gas_estimate_liquidation} out of range [300000, 3000000]`)
+  }
+  if (typeof p.circuit_breaker_failures !== 'number' || p.circuit_breaker_failures < 1 || p.circuit_breaker_failures > 20) {
+    errors.push(`circuit_breaker_failures=${p.circuit_breaker_failures} out of range [1, 20]`)
+  }
+  if (typeof p.circuit_breaker_pause_secs !== 'number' || p.circuit_breaker_pause_secs < 60 || p.circuit_breaker_pause_secs > 86_400) {
+    errors.push(`circuit_breaker_pause_secs=${p.circuit_breaker_pause_secs} out of range [60, 86400]`)
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`LLM proposed invalid parameters:\n${errors.join('\n')}`)
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -79,12 +121,14 @@ Key principles:
 
   try {
     const proposed = JSON.parse(content.text) as HeuristicParams
+    // Validate before accepting — guards against LLM hallucination
+    validateParams(proposed)
     // Ensure version is bumped
     proposed.version = input.current_params.version + 1
     proposed.updated_at = Math.floor(Date.now() / 1000)
     return proposed
   } catch (err) {
-    throw new Error(`Failed to parse LLM response as JSON: ${content.text}`)
+    throw new Error(`Failed to parse/validate LLM response: ${err instanceof Error ? err.message : String(err)}\nRaw: ${content.text}`)
   }
 }
 

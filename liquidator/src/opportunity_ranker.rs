@@ -318,7 +318,7 @@ impl<P: Provider> OpportunityRanker<P> {
         };
 
         const BATCH_BASE_GAS: u128   = 300_000;
-        const PER_POSITION_GAS: u128 = 600_000;
+        const PER_POSITION_GAS: u128 = 650_000; // must match tx_submitter.rs batch_gas_limit
 
         // Group by debt_asset
         let mut groups: HashMap<Address, Vec<&LiquidationOpportunity>> = HashMap::new();

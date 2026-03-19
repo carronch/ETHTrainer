@@ -60,7 +60,7 @@ impl Default for HeuristicParams {
             hf_hot_threshold: 1.05,       // scan on every block below this HF
             hot_scan_cap: 50,             // cap per block (RPC budget)
             scan_interval_ms: 3_000,
-            scan_batch_size: 200,
+            scan_batch_size: 500,
             gas_estimate_liquidation: 900_000,
             circuit_breaker_failures: 3,
             circuit_breaker_pause_secs: 3600,
