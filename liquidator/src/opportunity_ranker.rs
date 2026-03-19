@@ -10,13 +10,14 @@
 use crate::config::HeuristicParams;
 use crate::types::{AccountData, BatchLiquidationOpportunity, LiquidationOpportunity, RankResult, UserReserveData};
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, Bytes, U256},
     providers::Provider,
     sol,
+    sol_types::SolCall,
 };
 use anyhow::Result;
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::debug;
+use tracing::{debug, warn};
 
 sol! {
     #[sol(rpc)]
@@ -56,6 +57,32 @@ sol! {
     interface IAaveOracle {
         function getAssetsPrices(address[] calldata assets) external view returns (uint256[] memory);
     }
+
+    #[sol(rpc)]
+    interface IMulticall3 {
+        struct Call3 {
+            address target;
+            bool allowFailure;
+            bytes callData;
+        }
+        struct Result {
+            bool success;
+            bytes returnData;
+        }
+        function aggregate3(Call3[] calldata calls) external returns (Result[] memory returnData);
+    }
+}
+
+const MULTICALL3_ADDR: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+/// Static reserve configuration (decimals, liq bonus, active/frozen flags).
+/// Changes only on Aave governance votes — safe to cache for 1 hour.
+#[derive(Clone)]
+struct ReserveConfig {
+    decimals:          u8,
+    liquidation_bonus: u128,
+    is_active:         bool,
+    is_frozen:         bool,
 }
 
 const FLASH_LOAN_FEE_BPS: u128 = 9; // 0.09%
@@ -65,12 +92,16 @@ pub struct OpportunityRanker<P: Provider> {
     pool: Address,
     data_provider: Address,
     oracle: Address,
+    multicall: Address,
     /// Per-chain stablecoin addresses (use 0.01% Uniswap fee tier).
     stable_tokens: Vec<String>,
     /// Per-chain major token addresses: WETH, WBTC (use 0.05% fee tier).
     major_tokens: Vec<String>,
     /// Cached reserves list + fetch timestamp for TTL-based refresh.
     reserves_cache: tokio::sync::RwLock<Option<(Vec<Address>, Instant)>>,
+    /// Cached reserve configs (decimals, liq bonus, active/frozen) — 1h TTL.
+    /// Changes only on Aave governance votes, not per-user.
+    reserve_config_cache: tokio::sync::RwLock<Option<(HashMap<Address, ReserveConfig>, Instant)>>,
     /// WETH address on this chain (used to look up live ETH price from oracle).
     weth_address: Address,
     /// Per-chain token symbol map (lowercase address -> ticker).
@@ -93,9 +124,11 @@ impl<P: Provider> OpportunityRanker<P> {
             pool: pool.parse()?,
             data_provider: data_provider.parse()?,
             oracle: oracle.parse()?,
+            multicall: MULTICALL3_ADDR.parse()?,
             stable_tokens: stable_tokens.iter().map(|s| s.to_string()).collect(),
             major_tokens: major_tokens.iter().map(|s| s.to_string()).collect(),
             reserves_cache: tokio::sync::RwLock::new(None),
+            reserve_config_cache: tokio::sync::RwLock::new(None),
             weth_address: weth_address.parse()?,
             symbols,
         })
@@ -367,76 +400,122 @@ impl<P: Provider> OpportunityRanker<P> {
         Ok(list)
     }
 
+    /// Fetch user-reserve data for all assets in one Multicall3 aggregate3 call.
+    /// Reserve configs (decimals, liq bonus, active/frozen) come from cache (1h TTL).
     async fn get_user_reserves(
         &self,
         user: Address,
         reserves: &[Address],
     ) -> Result<Vec<UserReserveData>> {
-        let user_calls: Vec<_> = reserves
+        // Get reserve configs from cache (or populate via Multicall3)
+        let configs = self.get_reserve_configs(reserves).await?;
+
+        // Batch all getUserReserveData calls into one Multicall3 call
+        let mc = IMulticall3::new(self.multicall, self.provider.clone());
+        let calls: Vec<IMulticall3::Call3> = reserves
             .iter()
-            .copied()
-            .map(|a| {
-                let provider = self.provider.clone();
-                let dp_addr = self.data_provider;
-                async move {
-                    IDataProvider::new(dp_addr, provider)
-                        .getUserReserveData(a, user)
-                        .call()
-                        .await
-                }
+            .map(|&asset| IMulticall3::Call3 {
+                target:       self.data_provider,
+                allowFailure: true,
+                callData:     IDataProvider::getUserReserveDataCall { asset, user }
+                    .abi_encode()
+                    .into(),
             })
             .collect();
 
-        let cfg_calls: Vec<_> = reserves
-            .iter()
-            .copied()
-            .map(|a| {
-                let provider = self.provider.clone();
-                let dp_addr = self.data_provider;
-                async move {
-                    IDataProvider::new(dp_addr, provider)
-                        .getReserveConfigurationData(a)
-                        .call()
-                        .await
-                }
-            })
-            .collect();
-
-        let (user_results, cfg_results) = tokio::join!(
-            futures::future::join_all(user_calls),
-            futures::future::join_all(cfg_calls),
-        );
+        let results = mc.aggregate3(calls).call().await?;
 
         let mut out = Vec::new();
-        for i in 0..reserves.len() {
-            let ur = match &user_results[i] { Ok(v) => v, Err(_) => continue };
-            let cr = match &cfg_results[i]  { Ok(v) => v, Err(_) => continue };
+        for (i, r) in results.iter().enumerate() {
+            let asset = reserves[i];
 
-            if !cr.isActive || cr.isFrozen { continue; }
+            let cfg = match configs.get(&asset) {
+                Some(c) if c.is_active && !c.is_frozen => c,
+                _ => continue,
+            };
 
-            let a_token = ur.currentATokenBalance.to::<u128>();
-            let stable  = ur.currentStableDebt.to::<u128>();
-            let variable= ur.currentVariableDebt.to::<u128>();
+            if !r.success || r.returnData.is_empty() {
+                continue;
+            }
 
-            if a_token == 0 && stable == 0 && variable == 0 { continue; }
+            let ur = match IDataProvider::getUserReserveDataCall::abi_decode_returns(&r.returnData) {
+                Ok(v) => v,
+                Err(e) => { warn!(asset = ?asset, "getUserReserveData decode failed: {e}"); continue; }
+            };
+
+            let a_token  = ur.currentATokenBalance.to::<u128>();
+            let stable   = ur.currentStableDebt.to::<u128>();
+            let variable = ur.currentVariableDebt.to::<u128>();
+
+            if a_token == 0 && stable == 0 && variable == 0 {
+                continue;
+            }
 
             out.push(UserReserveData {
-                asset:              reserves[i],
-                symbol:             self.symbols
-                    .get(&reserves[i].to_string().to_lowercase())
+                asset,
+                symbol: self.symbols
+                    .get(&asset.to_string().to_lowercase())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("…{}", &reserves[i].to_string()[36..])),
-                decimals:           cr.decimals.to::<u8>(),
-                a_token_balance:    a_token,
-                stable_debt:        stable,
-                variable_debt:      variable,
-                total_debt:         stable + variable,
+                    .unwrap_or_else(|| format!("…{}", &asset.to_string()[36..])),
+                decimals:            cfg.decimals,
+                a_token_balance:     a_token,
+                stable_debt:         stable,
+                variable_debt:       variable,
+                total_debt:          stable + variable,
                 usage_as_collateral: ur.usageAsCollateralEnabled,
-                liquidation_bonus:  cr.liquidationBonus.to::<u128>(),
-                price_usd:          0, // filled by get_prices
+                liquidation_bonus:   cfg.liquidation_bonus,
+                price_usd:           0, // filled by get_prices
             });
         }
         Ok(out)
+    }
+
+    /// Fetch or return cached reserve configuration data (1h TTL).
+    /// Batched with Multicall3 on cache miss — one RPC call for all reserves.
+    async fn get_reserve_configs(&self, reserves: &[Address]) -> Result<HashMap<Address, ReserveConfig>> {
+        const CFG_CACHE_TTL_SECS: u64 = 3600; // 1 hour — configs only change on governance votes
+        {
+            let cache = self.reserve_config_cache.read().await;
+            if let Some((ref map, fetched_at)) = *cache {
+                if fetched_at.elapsed().as_secs() < CFG_CACHE_TTL_SECS {
+                    return Ok(map.clone());
+                }
+            }
+        }
+
+        // Cache miss — batch fetch all reserve configs in one Multicall3 call
+        let mc = IMulticall3::new(self.multicall, self.provider.clone());
+        let calls: Vec<IMulticall3::Call3> = reserves
+            .iter()
+            .map(|&asset| IMulticall3::Call3 {
+                target:       self.data_provider,
+                allowFailure: true,
+                callData:     IDataProvider::getReserveConfigurationDataCall { asset }
+                    .abi_encode()
+                    .into(),
+            })
+            .collect();
+
+        let results = mc.aggregate3(calls).call().await?;
+
+        let mut map = HashMap::new();
+        for (i, r) in results.iter().enumerate() {
+            if !r.success || r.returnData.is_empty() {
+                continue;
+            }
+            if let Ok(cr) = IDataProvider::getReserveConfigurationDataCall::abi_decode_returns(&r.returnData) {
+                map.insert(reserves[i], ReserveConfig {
+                    decimals:          cr.decimals.to::<u8>(),
+                    liquidation_bonus: cr.liquidationBonus.to::<u128>(),
+                    is_active:         cr.isActive,
+                    is_frozen:         cr.isFrozen,
+                });
+            }
+        }
+
+        let mut cache = self.reserve_config_cache.write().await;
+        *cache = Some((map.clone(), Instant::now()));
+        Ok(map)
     }
 
     async fn get_prices(&self, reserves: &[Address]) -> Result<HashMap<Address, u128>> {
