@@ -49,12 +49,14 @@ function scheduleAutoresearch(): void {
     console.log(`Autoresearch next run in ${(msUntil2amUTC / 3600000).toFixed(1)}h`)
 
     setTimeout(async () => {
-      try {
-        await runAutoresearchCycle()
-      } catch (err) {
-        const msg = `Autoresearch failed: ${err instanceof Error ? err.message : String(err)}`
-        console.error(msg)
-        await alertError(msg)
+      for (const chain of ['arbitrum', 'base']) {
+        try {
+          await runAutoresearchCycle(chain)
+        } catch (err) {
+          const msg = `Autoresearch (${chain}) failed: ${err instanceof Error ? err.message : String(err)}`
+          console.error(msg)
+          await alertError(msg)
+        }
       }
       // Schedule next run (24h later)
       runAt2amUTC()
@@ -72,12 +74,14 @@ function scheduleAutoresearch(): void {
   console.log(`Autoresearch scheduled for 2am UTC (in ${(msUntil2amUTC / 3600000).toFixed(1)}h)`)
 
   setTimeout(async () => {
-    try {
-      await runAutoresearchCycle()
-    } catch (err) {
-      const msg = `Autoresearch failed: ${err instanceof Error ? err.message : String(err)}`
-      console.error(msg)
-      await alertError(msg)
+    for (const chain of ['arbitrum', 'base']) {
+      try {
+        await runAutoresearchCycle(chain)
+      } catch (err) {
+        const msg = `Autoresearch (${chain}) failed: ${err instanceof Error ? err.message : String(err)}`
+        console.error(msg)
+        await alertError(msg)
+      }
     }
     // Schedule next run
     runAt2amUTC()

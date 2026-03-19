@@ -151,20 +151,18 @@ impl<P: Provider> OpportunityRanker<P> {
         let close_factor = if account.health_factor < hf_95pct { 100u128 } else { 50u128 };
         let debt_to_cover = best_debt.total_debt.saturating_mul(close_factor) / 100;
 
-        // Collateral received (in collateral token units)
-        let collateral_received = debt_to_cover
-            .saturating_mul(debt_price)
-            .saturating_mul(best_collateral.liquidation_bonus)
-            / collateral_price
-            / 10_000;
-
         // Flash loan fee (0.09%)
         let flash_loan_fee = debt_to_cover.saturating_mul(FLASH_LOAN_FEE_BPS) / 10_000;
 
-        // Collateral value expressed in debt-token units (for apples-to-apples profit math)
-        let collateral_value_in_debt = collateral_received
-            .saturating_mul(collateral_price)
-            / debt_price;
+        // Collateral value expressed in debt-token units.
+        // Math: collateral_received_raw = debt_to_cover * debt_price * liq_bonus
+        //         * 10^coll_dec / (collateral_price * 10_000 * 10^debt_dec)
+        //       collateral_value_in_debt = collateral_received_raw * collateral_price / debt_price
+        //         * 10^debt_dec / 10^coll_dec
+        //       → all price and decimal factors cancel → debt_to_cover * liq_bonus / 10_000
+        let collateral_value_in_debt = debt_to_cover
+            .saturating_mul(best_collateral.liquidation_bonus)
+            / 10_000;
 
         // Uniswap swap fee on the collateral→debt swap; pool_fee is in 1/1_000_000 units.
         let pool_fee = self.preferred_fee(&best_collateral.asset, &best_debt.asset);

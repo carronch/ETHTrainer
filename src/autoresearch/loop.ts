@@ -28,9 +28,14 @@ import {
   writeParams,
 } from './parameter_compiler.js'
 import { validate } from './shadow_evaluator.js'
+import { pruneWatchlist } from './watchlist_pruner.js'
 import type { AutoresearchReport, SimulationResult } from './types.js'
 
-const ARBITRUM_RPC_URL = process.env.ARBITRUM_RPC_URL ?? ''
+const CHAIN_RPC_URLS: Record<string, string> = {
+  arbitrum: process.env.ARBITRUM_RPC_URL ?? '',
+  base:     process.env.BASE_RPC_URL ?? '',
+  optimism: process.env.OPTIMISM_RPC_URL ?? '',
+}
 
 // ── Main cycle ────────────────────────────────────────────────────────────────
 
@@ -45,6 +50,9 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
   let simulationsRun = 0
 
   try {
+    // ── Step 0: Prune watchlist ───────────────────────────────────────────────
+    const pruneResult = pruneWatchlist()
+
     // ── Step 1: Collect missed opportunities ──────────────────────────────────
 
     const missed = await getMissedOpportunities(chain, 24)
@@ -62,7 +70,8 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
     // ── Step 3: Propose new params via Claude ─────────────────────────────────
 
     // If we have no missed opportunities and win rate is good, skip simulation
-    const shouldSimulate = missed.length > 0 && ARBITRUM_RPC_URL
+    const chainRpcUrl = CHAIN_RPC_URLS[chain] ?? ''
+    const shouldSimulate = missed.length > 0 && chainRpcUrl
 
     let simResults: SimulationResult[] = []
     let proposedParams = null
@@ -80,7 +89,7 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
         missed.slice(0, 20), // cap at 20 simulations per night (cost control)
         currentParams,
         proposedParams,
-        ARBITRUM_RPC_URL,
+        chainRpcUrl,
       )
       simulationsRun = simResults.length
 
@@ -178,7 +187,7 @@ export async function runAutoresearchCycle(chain = 'arbitrum'): Promise<Autorese
       rationale: validation?.reason ?? 'No proposal generated',
     }
 
-    await sendReport(report, tradeStats, captureRate)
+    await sendReport(report, tradeStats, captureRate, pruneResult)
 
     // ── Step 8: Mark analyzed ─────────────────────────────────────────────────
 
@@ -199,6 +208,7 @@ async function sendReport(
   report: AutoresearchReport,
   stats: ReturnType<typeof getRecentTradeStats>,
   captureRate: string,
+  prune: { deactivated: number; requeued: number; active_total: number },
 ): Promise<void> {
   const paramsChanged = report.applied && report.new_params
 
@@ -218,6 +228,11 @@ async function sendReport(
     report.improvement_pct !== null
       ? `*Shadow Evaluation*\nImprovement: ${report.improvement_pct.toFixed(2)}%\n${report.rationale}`
       : `*No parameter changes proposed*`,
+    ``,
+    `*Watchlist Housekeeping*`,
+    `Deactivated (HF>1.5): ${prune.deactivated}`,
+    `Requeued (NULL batch): ${prune.requeued}`,
+    `Active total: ${prune.active_total}`,
   ]
 
   if (paramsChanged && report.new_params) {
