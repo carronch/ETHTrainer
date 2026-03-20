@@ -279,6 +279,12 @@ async fn main() -> Result<()> {
         let mut batch_candidates: Vec<LiquidationOpportunity> = Vec::new();
 
         for account in &liquidatable {
+            // Skip dust positions — gas always exceeds profit, useless for autoresearch
+            let debt_usd = account.total_debt_base as f64 / 1e8;
+            if debt_usd < 10.0 {
+                continue;
+            }
+
             match opportunity_ranker.find_best(account, &params).await {
                 Ok(RankResult::Profitable(opp)) => {
                     info!(
