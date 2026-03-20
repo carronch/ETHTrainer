@@ -102,6 +102,12 @@ pub struct OpportunityRanker<P: Provider> {
     /// Cached reserve configs (decimals, liq bonus, active/frozen) — 1h TTL.
     /// Changes only on Aave governance votes, not per-user.
     reserve_config_cache: tokio::sync::RwLock<Option<(HashMap<Address, ReserveConfig>, Instant)>>,
+    /// Cached oracle prices for all reserves — 10s TTL.
+    /// Fetched once per scan cycle instead of once per liquidatable position.
+    prices_cache: tokio::sync::RwLock<Option<(HashMap<Address, u128>, Instant)>>,
+    /// Cached gas price — 10s TTL.
+    /// Fetched once per scan cycle instead of once per liquidatable position.
+    gas_price_cache: tokio::sync::RwLock<Option<(u128, Instant)>>,
     /// WETH address on this chain (used to look up live ETH price from oracle).
     weth_address: Address,
     /// Per-chain token symbol map (lowercase address -> ticker).
@@ -129,6 +135,8 @@ impl<P: Provider> OpportunityRanker<P> {
             major_tokens: major_tokens.iter().map(|s| s.to_string()).collect(),
             reserves_cache: tokio::sync::RwLock::new(None),
             reserve_config_cache: tokio::sync::RwLock::new(None),
+            prices_cache: tokio::sync::RwLock::new(None),
+            gas_price_cache: tokio::sync::RwLock::new(None),
             weth_address: weth_address.parse()?,
             symbols,
         })
@@ -142,7 +150,7 @@ impl<P: Provider> OpportunityRanker<P> {
         let reserves = self.get_reserves().await?;
         let (user_data, prices) = tokio::try_join!(
             self.get_user_reserves(account.address, &reserves),
-            self.get_prices(&reserves),
+            self.get_prices_cached(&reserves),
         )?;
 
         let collaterals: Vec<_> = user_data
@@ -223,8 +231,8 @@ impl<P: Provider> OpportunityRanker<P> {
             .saturating_mul(1_000_000_000_000_000_000) // 1e18
             / eth_price_usd_8dec;
 
-        // Gas cost
-        let gas_price = self.provider.get_gas_price().await?;
+        // Gas cost (cached 10s — same value across all positions in one scan cycle)
+        let gas_price = self.get_gas_price_cached().await?;
         let gas_cost_wei = params.gas_estimate_liquidation as u128 * gas_price;
 
         // Below gas cost — candidate for batching
@@ -312,7 +320,7 @@ impl<P: Provider> OpportunityRanker<P> {
         candidates: &[LiquidationOpportunity],
         params: &HeuristicParams,
     ) -> Vec<BatchLiquidationOpportunity> {
-        let gas_price = match self.provider.get_gas_price().await {
+        let gas_price = match self.get_gas_price_cached().await {
             Ok(p) => p,
             Err(_) => return vec![],
         };
@@ -430,7 +438,9 @@ impl<P: Provider> OpportunityRanker<P> {
             let asset = reserves[i];
 
             let cfg = match configs.get(&asset) {
-                Some(c) if c.is_active && !c.is_frozen => c,
+                // Include frozen reserves — frozen means no new borrows/deposits,
+                // but existing positions (incl. USDbC on Base) are still liquidatable.
+                Some(c) if c.is_active => c,
                 _ => continue,
             };
 
@@ -522,5 +532,39 @@ impl<P: Provider> OpportunityRanker<P> {
         let oracle = IAaveOracle::new(self.oracle, self.provider.clone());
         let prices = oracle.getAssetsPrices(reserves.to_vec()).call().await?;
         Ok(reserves.iter().copied().zip(prices.iter().map(|p: &U256| p.to::<u128>())).collect())
+    }
+
+    /// Oracle prices cached for 10s — fetched once per scan cycle, not once per position.
+    async fn get_prices_cached(&self, reserves: &[Address]) -> Result<HashMap<Address, u128>> {
+        const PRICE_TTL_SECS: u64 = 10;
+        {
+            let cache = self.prices_cache.read().await;
+            if let Some((ref map, fetched_at)) = *cache {
+                if fetched_at.elapsed().as_secs() < PRICE_TTL_SECS {
+                    return Ok(map.clone());
+                }
+            }
+        }
+        let prices = self.get_prices(reserves).await?;
+        let mut cache = self.prices_cache.write().await;
+        *cache = Some((prices.clone(), Instant::now()));
+        Ok(prices)
+    }
+
+    /// Gas price cached for 10s — fetched once per scan cycle, not once per position.
+    async fn get_gas_price_cached(&self) -> Result<u128> {
+        const GAS_TTL_SECS: u64 = 10;
+        {
+            let cache = self.gas_price_cache.read().await;
+            if let Some((price, fetched_at)) = *cache {
+                if fetched_at.elapsed().as_secs() < GAS_TTL_SECS {
+                    return Ok(price);
+                }
+            }
+        }
+        let price = self.provider.get_gas_price().await?;
+        let mut cache = self.gas_price_cache.write().await;
+        *cache = Some((price, Instant::now()));
+        Ok(price)
     }
 }
